@@ -8,6 +8,7 @@ from assistant_server.realtime import (
     ConnectionLimiter,
     build_session_update,
     classify_upstream_connection_error,
+    should_start_acoustic_relay,
 )
 
 
@@ -31,6 +32,35 @@ def test_wake_phrase_has_a_short_fixed_acknowledgement():
     assert "Qwen3.5 Omni" in instructions
     assert "不要模仿任何现实人物的声纹" in instructions
     assert "不是你的模型身份" in instructions
+
+
+def test_low_risk_home_command_uses_acoustic_relay_prompt():
+    settings = Settings.from_env()
+    instructions = build_session_update(settings)["session"]["instructions"]
+
+    assert "外部天猫精灵声学转发" in instructions
+    assert "天猫精灵，打开卧室灯" in instructions
+    assert should_start_acoustic_relay("天猫管家，帮我打开卧室的灯")
+    assert should_start_acoustic_relay("把厨房灯关了")
+    assert should_start_acoustic_relay("把客厅空调调到二十六度")
+
+
+@pytest.mark.parametrize(
+    "transcript",
+    (
+        "不要打开卧室灯",
+        "怎么选择卧室灯",
+        "怎么开卧室灯",
+        "开灯方法",
+        "空调开着耗电吗",
+        "帮我开关卧室灯",
+        "门锁打开",
+        "关闭燃气",
+        "我刚才说了打开空调",
+    ),
+)
+def test_acoustic_relay_rejects_non_command_or_sensitive_request(transcript):
+    assert not should_start_acoustic_relay(transcript)
 
 
 def test_account_memory_is_delimited_as_untrusted_context():

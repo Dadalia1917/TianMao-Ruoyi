@@ -12,6 +12,9 @@
         processor: null,
         mediaSource: null,
         muted: false,
+        captureSuppressed: false,
+        acousticRelayPending: false,
+        relaySafetyTimer: null,
         manualStop: false,
         nextPlayAt: 0,
         playingSources: [],
@@ -47,6 +50,7 @@
         await this.stop(false)
         this.manualStop = false
         this.muted = false
+        this.resetAcousticRelay()
         this.assistantText = ''
         this.speakingSent = false
         this.responding = false
@@ -124,6 +128,7 @@
         this.stopKeepalive()
         this.stopCapture()
         this.clearPlayback()
+        this.resetAcousticRelay()
         const socket = this.socket
         this.socket = null
         this.connectionOptions = null
@@ -150,7 +155,13 @@
           }
           return
         }
+        if (type === 'assistant.acoustic_relay.pending') {
+          this.beginAcousticRelay(event)
+          return
+        }
         if (type === 'input_audio_buffer.speech_started') {
+          // 声学转发期间，本机扬声器和附近天猫精灵的回应都不能回灌给 Omni。
+          if (this.captureSuppressed) return
           if (this.responding && this.socket && this.socket.readyState === WebSocket.OPEN) {
             this.socket.send(JSON.stringify({ type: 'response.cancel' }))
           }
@@ -177,6 +188,9 @@
         }
         if (type === 'response.audio_transcript.delta' || type === 'response.text.delta') {
           this.assistantText += event.delta || ''
+          if (!this.acousticRelayPending && /^天猫精灵\s*[，,]/.test(this.assistantText.trim())) {
+            this.beginAcousticRelay({ message: '正在把家居指令转达给附近的天猫精灵' })
+          }
           this.scheduleTextUpdate()
           return
         }
@@ -195,7 +209,7 @@
         }
         if (type === 'response.done') {
           this.responding = false
-          this.schedulePlaybackDone()
+          this.schedulePlaybackDone(this.acousticRelayPending ? 4500 : 0)
           return
         }
         if (type === 'assistant.session.rotating') {
@@ -320,7 +334,7 @@
         }
       },
       sendCaptureFrame(input, inputRate) {
-        if (this.muted || !this.socket || this.socket.readyState !== WebSocket.OPEN) return
+        if (this.muted || this.captureSuppressed || !this.socket || this.socket.readyState !== WebSocket.OPEN) return
         if (this.socket.bufferedAmount > 512 * 1024) return
         const pcm = this.downsampleToPcm16(input, inputRate, TARGET_INPUT_RATE)
         if (!pcm.length) return
@@ -357,6 +371,28 @@
         if (value && this.socket && this.socket.readyState === WebSocket.OPEN) {
           this.socket.send(JSON.stringify({ type: 'input_audio_buffer.clear' }))
         }
+      },
+      beginAcousticRelay(event) {
+        this.acousticRelayPending = true
+        this.captureSuppressed = true
+        if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+          try { this.socket.send(JSON.stringify({ type: 'input_audio_buffer.clear' })) } catch (error) {}
+        }
+        if (this.relaySafetyTimer) clearTimeout(this.relaySafetyTimer)
+        this.relaySafetyTimer = setTimeout(() => {
+          this.resetAcousticRelay()
+          this.emit({ type: 'playback.done' })
+        }, 20000)
+        this.emit({
+          type: 'relay.started',
+          message: event.message || '正在把指令转达给附近的天猫精灵'
+        })
+      },
+      resetAcousticRelay() {
+        if (this.relaySafetyTimer) clearTimeout(this.relaySafetyTimer)
+        this.relaySafetyTimer = null
+        this.acousticRelayPending = false
+        this.captureSuppressed = false
       },
       downsampleToPcm16(input, inputRate, outputRate) {
         if (!input || !input.length || outputRate > inputRate) return new Int16Array(0)
@@ -431,11 +467,14 @@
         this.playingSources = []
         if (this.playbackContext) this.nextPlayAt = this.playbackContext.currentTime
       },
-      schedulePlaybackDone() {
+      schedulePlaybackDone(extraHoldMs = 0) {
         if (this.playbackTimer) clearTimeout(this.playbackTimer)
         const context = this.playbackContext
-        const delay = context ? Math.max(80, (this.nextPlayAt - context.currentTime) * 1000 + 100) : 80
-        this.playbackTimer = setTimeout(() => this.emit({ type: 'playback.done' }), delay)
+        const playbackDelay = context ? Math.max(80, (this.nextPlayAt - context.currentTime) * 1000 + 100) : 80
+        this.playbackTimer = setTimeout(() => {
+          this.resetAcousticRelay()
+          this.emit({ type: 'playback.done' })
+        }, playbackDelay + Math.max(0, Number(extraHoldMs) || 0))
       },
       scheduleTextUpdate() {
         if (this.textTimer) return

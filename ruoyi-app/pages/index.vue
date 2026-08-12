@@ -684,6 +684,7 @@
           case 'speech.stopped':
           case 'assistant.thinking': this.status = 'thinking'; break
           case 'assistant.speaking': this.status = 'speaking'; break
+          case 'relay.started': this.status = 'speaking'; break
           case 'playback.done': if (this.isActive) this.status = 'listening'; break
           case 'user.text': this.appendUserMessage(event.text); break
           case 'assistant.text': this.updateAssistantMessage(event.text, Boolean(event.final)); break

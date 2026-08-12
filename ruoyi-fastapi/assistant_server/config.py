@@ -41,6 +41,8 @@ class Settings:
     dashscope_realtime_url: str
     dashscope_model: str
     dashscope_voice: str
+    acoustic_relay_enabled: bool
+    acoustic_relay_wake_phrase: str
     host: str
     port: int
     log_level: str
@@ -103,6 +105,11 @@ class Settings:
                 "DASHSCOPE_MODEL", "qwen3.5-omni-plus-realtime"
             ).strip(),
             dashscope_voice=os.getenv("DASHSCOPE_VOICE", "Ethan").strip(),
+            acoustic_relay_enabled=_as_bool("ACOUSTIC_RELAY_ENABLED", True),
+            acoustic_relay_wake_phrase=os.getenv(
+                "ACOUSTIC_RELAY_WAKE_PHRASE", "天猫精灵"
+            ).strip()
+            or "天猫精灵",
             host=os.getenv("HOST", "0.0.0.0").strip(),
             port=_as_int("PORT", 8001),
             log_level=os.getenv("LOG_LEVEL", "info").strip().lower(),
