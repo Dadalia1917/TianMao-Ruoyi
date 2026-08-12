@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.system.mapper.AiAssistantMapper">
+
+    <resultMap type="AiVoiceSession" id="AiVoiceSessionResult">
+        <id property="sessionId" column="session_id" />
+        <result property="qwenSessionId" column="qwen_session_id" />
+        <result property="userKey" column="user_key" />
+        <result property="userId" column="user_id" />
+        <result property="userName" column="user_name" />
+        <result property="nickName" column="nick_name" />
+        <result property="clientId" column="client_id" />
+        <result property="clientIp" column="client_ip" />
+        <result property="modelName" column="model_name" />
+        <result property="voiceName" column="voice_name" />
+        <result property="status" column="status" />
+        <result property="startedAt" column="started_at" />
+        <result property="endedAt" column="ended_at" />
+        <result property="durationMs" column="duration_ms" />
+        <result property="messageCount" column="message_count" />
+        <result property="inputTextChars" column="input_text_chars" />
+        <result property="outputTextChars" column="output_text_chars" />
+        <result property="closeReason" column="close_reason" />
+        <result property="createTime" column="create_time" />
+        <result property="updateTime" column="update_time" />
+    </resultMap>
+
+    <resultMap type="AiUserMemory" id="AiUserMemoryResult">
+        <id property="memoryId" column="memory_id" />
+        <result property="userId" column="user_id" />
+        <result property="userName" column="user_name" />
+        <result property="nickName" column="nick_name" />
+        <result property="memoryKey" column="memory_key" />
+        <result property="category" column="category" />
+        <result property="memoryValue" column="memory_value" />
+        <result property="confidence" column="confidence" />
+        <result property="sourceSessionId" column="source_session_id" />
+        <result property="status" column="status" />
+        <result property="lastUsedAt" column="last_used_at" />
+        <result property="createTime" column="create_time" />
+        <result property="updateTime" column="update_time" />
+    </resultMap>
+
+    <select id="selectOverview" resultType="java.util.HashMap">
+        SELECT
+            (SELECT COUNT(*) FROM ai_voice_session) AS totalSessions,
+            (SELECT COUNT(*) FROM ai_voice_session WHERE started_at &gt;= CURDATE()) AS todaySessions,
+            (SELECT COUNT(*) FROM ai_voice_session WHERE status = 'failed' AND started_at &gt;= CURDATE()) AS todayFailures,
+            (SELECT COALESCE(SUM(duration_ms), 0) FROM ai_voice_session) AS totalDurationMs,
+            (SELECT COUNT(*) FROM ai_user_memory WHERE status = '0') AS activeMemories,
+            (SELECT COUNT(DISTINCT user_id) FROM ai_user_memory WHERE status = '0') AS memoryUsers
+    </select>
+
+    <select id="selectVoiceSessionList" parameterType="AiVoiceSession" resultMap="AiVoiceSessionResult">
+        SELECT s.session_id, s.qwen_session_id, s.user_key, s.user_id,
+               u.user_name, u.nick_name, s.client_id, s.client_ip,
+               s.model_name, s.voice_name, s.status, s.started_at, s.ended_at,
+               s.duration_ms, s.message_count, s.input_text_chars, s.output_text_chars,
+               s.close_reason, s.create_time, s.update_time
+        FROM ai_voice_session s
+        LEFT JOIN sys_user u ON u.user_id = s.user_id
+        <where>
+            <if test="userName != null and userName != ''">
+                AND (u.user_name LIKE CONCAT('%', #{userName}, '%')
+                     OR u.nick_name LIKE CONCAT('%', #{userName}, '%')
+                     OR s.user_key LIKE CONCAT('%', #{userName}, '%'))
+            </if>
+            <if test="status != null and status != ''">
+                AND s.status = #{status}
+            </if>
+            <if test="modelName != null and modelName != ''">
+                AND s.model_name LIKE CONCAT('%', #{modelName}, '%')
+            </if>
+            <if test="params.beginTime != null and params.beginTime != ''">
+                AND s.started_at &gt;= #{params.beginTime}
+            </if>
+            <if test="params.endTime != null and params.endTime != ''">
+                AND s.started_at &lt;= #{params.endTime}
+            </if>
+        </where>
+        ORDER BY s.started_at DESC
+    </select>
+
+    <select id="selectUserMemoryList" parameterType="AiUserMemory" resultMap="AiUserMemoryResult">
+        SELECT m.memory_id, m.user_id, u.user_name, u.nick_name, m.memory_key,
+               m.category, m.memory_value, m.confidence, m.source_session_id,
+               m.status, m.last_used_at, m.create_time, m.update_time
+        FROM ai_user_memory m
+        LEFT JOIN sys_user u ON u.user_id = m.user_id
+        <where>
+            <if test="userName != null and userName != ''">
+                AND (u.user_name LIKE CONCAT('%', #{userName}, '%')
+                     OR u.nick_name LIKE CONCAT('%', #{userName}, '%'))
+            </if>
+            <if test="category != null and category != ''">
+                AND m.category = #{category}
+            </if>
+            <if test="status != null and status != ''">
+                AND m.status = #{status}
+            </if>
+            <if test="params.beginTime != null and params.beginTime != ''">
+                AND m.update_time &gt;= #{params.beginTime}
+            </if>
+            <if test="params.endTime != null and params.endTime != ''">
+                AND m.update_time &lt;= #{params.endTime}
+            </if>
+        </where>
+        ORDER BY m.update_time DESC
+    </select>
+
+    <update id="deleteUserMemoryByIds" parameterType="Long">
+        UPDATE ai_user_memory
+        SET status = '1', update_time = CURRENT_TIMESTAMP(3)
+        WHERE memory_id IN
+        <foreach collection="array" item="memoryId" open="(" separator="," close=")">
+            #{memoryId}
+        </foreach>
+    </update>
+</mapper>

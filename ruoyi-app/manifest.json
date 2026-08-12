@@ -1,0 +1,92 @@
+{
+    "name" : "天猫智家语音助手",
+    "appid" : "__UNI__25A9D80",
+    "description" : "基于千问实时语音的天猫智能家居助手",
+    "versionName" : "1.0.0",
+    "versionCode" : "100",
+    "transformPx" : false,
+    "uniStatistics" : {
+        "enable" : false
+    },
+    "app-plus" : {
+        "usingComponents" : true,
+        "nvueCompiler" : "uni-app",
+        "screenOrientation" : [ "landscape-primary", "landscape-secondary" ],
+        "allowsInlineMediaPlayback" : true,
+        "mediaPlaybackRequiresUserAction" : false,
+        "privacy" : {
+            "prompt" : "template"
+        },
+        "splashscreen" : {
+            "alwaysShowBeforeRender" : true,
+            "waiting" : true,
+            "autoclose" : true,
+            "delay" : 0
+        },
+        "modules" : {},
+        "distribute" : {
+            "android" : {
+                "packagename" : "com.jpx.tmallsmarthome",
+                "minSdkVersion" : 23,
+                "targetSdkVersion" : 35,
+                "abiFilters" : [ "arm64-v8a", "armeabi-v7a" ],
+                "usesCleartextTraffic" : true,
+                "schemes" : "smartbutler",
+                "permissions" : [
+                    "<uses-permission android:name=\"android.permission.INTERNET\"/>",
+                    "<uses-permission android:name=\"android.permission.RECORD_AUDIO\"/>",
+                    "<uses-permission android:name=\"android.permission.MODIFY_AUDIO_SETTINGS\"/>",
+                    "<uses-permission android:name=\"android.permission.VIBRATE\"/>",
+                    "<uses-permission android:name=\"android.permission.ACCESS_WIFI_STATE\"/>",
+                    "<uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\"/>",
+                    "<uses-permission android:name=\"android.permission.WAKE_LOCK\"/>",
+                    "<uses-feature android:name=\"android.hardware.microphone\" android:required=\"true\"/>"
+                ]
+            },
+            "ios" : {
+                "dSYMs" : false,
+                "urltypes" : "smartbutler",
+                "privacyDescription" : {
+                    "NSMicrophoneUsageDescription" : "天猫智家需要使用麦克风与语音助手实时通话"
+                }
+            },
+            "sdkConfigs" : {},
+            "icons" : {
+                "android" : {
+                    "mdpi" : "static/icons/android/icon-48.png",
+                    "hdpi" : "static/icons/android/icon-72.png",
+                    "xhdpi" : "static/icons/android/icon-96.png",
+                    "xxhdpi" : "static/icons/android/icon-144.png",
+                    "xxxhdpi" : "static/icons/android/icon-192.png"
+                }
+            }
+        }
+    },
+    "quickapp" : {},
+    "mp-weixin" : {
+        "appid" : "wxccd7e2a0911b3397",
+        "setting" : {
+            "urlCheck" : false,
+            "es6" : false,
+            "minified" : true,
+            "postcss" : true
+        },
+        "optimization" : {
+            "subPackages" : true
+        },
+        "usingComponents" : true
+    },
+    "vueVersion" : "3",
+    "h5" : {
+        "template" : "static/index.html",
+        "devServer" : {
+            "port" : 9090,
+            "https" : false
+        },
+        "title" : "天猫智家语音助手",
+        "router" : {
+            "mode" : "hash",
+            "base" : "./"
+        }
+    }
+}

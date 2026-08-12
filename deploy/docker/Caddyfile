@@ -1,0 +1,67 @@
+{$PUBLIC_DOMAIN} {
+	encode zstd gzip
+
+	log {
+		output stdout
+		format console
+	}
+
+	header {
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "microphone=(self)"
+		-Server
+	}
+
+	handle /ws/v1/* {
+		reverse_proxy fastapi:8001
+	}
+
+	handle /api/v1/* {
+		reverse_proxy fastapi:8001
+	}
+
+	handle /health/* {
+		reverse_proxy fastapi:8001
+	}
+
+	handle /aligenie/* {
+		reverse_proxy aligenie-app-launcher:8010
+	}
+
+	handle /launch* {
+		reverse_proxy aligenie-app-launcher:8010
+	}
+
+	handle_path /prod-api/* {
+		reverse_proxy java:8080
+	}
+
+	@java_exact path /login /logout /register /captchaImage /getInfo /getRouters
+	handle @java_exact {
+		reverse_proxy java:8080
+	}
+
+	@java_api path /system/* /monitor/* /tool/* /common/* /assistant/* /profile/*
+	handle @java_api {
+		reverse_proxy java:8080
+	}
+
+	@admin_root path /admin
+	handle @admin_root {
+		redir /admin/ 308
+	}
+
+	handle_path /admin/* {
+		root * /srv/admin
+		try_files {path} /index.html
+		file_server
+	}
+
+	handle {
+		root * /srv/app
+		try_files {path} /index.html
+		file_server
+	}
+}

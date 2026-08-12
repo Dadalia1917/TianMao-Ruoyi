@@ -1,0 +1,67 @@
+######################################################################
+# Build Tools
+
+.gradle
+/build/
+!gradle/wrapper/gradle-wrapper.jar
+
+target/
+!.mvn/wrapper/maven-wrapper.jar
+
+######################################################################
+# IDE
+
+### STS ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+
+### IntelliJ IDEA ###
+.idea
+*.iws
+*.iml
+*.ipr
+
+### Python caches ###
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+### JRebel ###
+rebel.xml
+
+### NetBeans ###
+nbproject/private/
+build/*
+nbbuild/
+dist/
+nbdist/
+.nb-gradle/
+
+######################################################################
+# Others
+*.log
+/logs/
+*.xml.versionsBackup
+*.swp
+.env
+.env.local
+.env.*.local
+!.env.example
+!**/.env.example
+deploy/docker/.env
+
+# Android signing and local package artifacts
+ruoyi-app/apk/.signing/
+*.jks
+*.keystore
+ruoyi-app/android-native/local.properties
+ruoyi-app/android-native/.gradle/
+ruoyi-app/android-native/app/build/
+
+!*/build/*.java
+!*/build/*.html
+!*/build/*.xml

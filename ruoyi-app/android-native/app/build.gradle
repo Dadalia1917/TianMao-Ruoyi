@@ -1,0 +1,62 @@
+plugins {
+    id "com.android.application"
+}
+
+def releaseStore = System.getenv("TMALL_KEYSTORE_FILE")
+def releaseStorePassword = System.getenv("TMALL_KEYSTORE_PASSWORD")
+def releaseKeyPassword = System.getenv("TMALL_KEY_PASSWORD") ?: releaseStorePassword
+def releaseKeyAlias = System.getenv("TMALL_KEY_ALIAS") ?: "tmall-smart-home"
+
+android {
+    namespace "com.jpx.tmallsmarthome"
+    compileSdk 37
+
+    defaultConfig {
+        applicationId "com.jpx.tmallsmarthome"
+        minSdk 23
+        targetSdk 35
+        versionCode 100
+        versionName "1.0.0"
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    signingConfigs {
+        release {
+            if (releaseStore) {
+                storeFile file(releaseStore)
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            applicationIdSuffix ".debug"
+            versionNameSuffix "-debug"
+        }
+        release {
+            minifyEnabled false
+            shrinkResources false
+            signingConfig signingConfigs.release
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+        }
+    }
+
+    sourceSets {
+        main {
+            // 直接打包 uni-app 的 H5 发行资源，避免复制后产生两份源码。
+            assets.srcDirs = ["../../dist"]
+        }
+    }
+
+    packaging {
+        resources {
+            excludes += ["META-INF/DEPENDENCIES", "META-INF/LICENSE*", "META-INF/NOTICE*"]
+        }
+    }
+}
