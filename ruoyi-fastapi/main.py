@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from starlette.websockets import WebSocketDisconnect
 
 from assistant_server.auth import AuthenticationError, RuoYiAuthenticator
+from assistant_server.agent import AgentRequest, HouseholdAgentService
 from assistant_server.config import Settings, load_local_env
 from assistant_server.history import VoiceHistoryStore
 from assistant_server.memory import MemoryManager
@@ -50,6 +51,8 @@ async def lifespan(app: FastAPI):
     await memory.start()
     text_chat = TextChatService(settings)
     await text_chat.start()
+    agent = HouseholdAgentService(settings)
+    await agent.start()
     limiter = ConnectionLimiter(
         settings.max_connections, settings.max_connections_per_user
     )
@@ -61,22 +64,27 @@ async def lifespan(app: FastAPI):
     app.state.history = history
     app.state.memory = memory
     app.state.text_chat = text_chat
+    app.state.agent = agent
     app.state.limiter = limiter
     app.state.text_limiter = text_limiter
     app.state.metrics = metrics
-    app.state.proxy = RealtimeProxy(settings, limiter, metrics, history, memory)
+    app.state.proxy = RealtimeProxy(
+        settings, limiter, metrics, history, memory, agent
+    )
     logger.info(
-        "assistant server ready: version=%s model=%s api_key=%s database=%s memory=%s text=%s",
+        "assistant server ready: version=%s model=%s api_key=%s database=%s memory=%s text=%s agent=%s",
         APP_VERSION,
         settings.dashscope_model,
         "configured" if settings.dashscope_api_key else "missing",
         "ready" if history.ready else "disabled",
         "ready" if memory.ready else "disabled",
         "ready" if text_chat.ready else "disabled",
+        "ready" if agent.ready else "policy_only" if agent.enabled else "disabled",
     )
     try:
         yield
     finally:
+        await agent.close()
         await text_chat.close()
         await memory.close()
         await history.close()
@@ -165,6 +173,13 @@ async def ready(request: Request) -> JSONResponse:
                 else "not_ready"
             ),
             "active_text_sessions": request.app.state.text_limiter.active,
+            "household_agent": (
+                "ready"
+                if request.app.state.agent.ready
+                else "policy_only"
+                if request.app.state.agent.enabled
+                else "disabled"
+            ),
         },
     )
 
@@ -211,6 +226,36 @@ async def text_models(request: Request) -> dict[str, Any]:
     await _authenticated_user(request)
     items = request.app.state.text_chat.model_catalog()
     return {"items": items, "count": len(items)}
+
+
+@app.get("/api/v1/agent/capabilities")
+async def agent_capabilities(request: Request) -> dict[str, Any]:
+    await _authenticated_user(request)
+    return {
+        "enabled": request.app.state.agent.enabled,
+        "function_calling": request.app.state.agent.ready,
+        "policy_fallback": True,
+        "devices": [
+            "灯", "空调", "新风", "窗帘", "电视", "投影仪", "风扇",
+            "空气净化器", "加湿器", "除湿机", "扫地机器人", "智能插座",
+        ],
+        "context_tools": {
+            "weather": settings.agent_weather_enabled,
+            "simulated_environment": settings.agent_simulated_environment_enabled,
+        },
+        "execution_channel": "android_genie_content_provider",
+        "policy_version": "household-agent-1.0",
+    }
+
+
+@app.post("/api/v1/agent/plan")
+async def plan_home_action(payload: AgentRequest, request: Request) -> dict[str, Any]:
+    user_id = await _authenticated_user(request)
+    decision = await request.app.state.agent.plan(
+        payload.model_copy(update={"user_id": user_id})
+    )
+    request.app.state.metrics.inc(f"agent_{decision.status.value}_total")
+    return decision.model_dump(mode="json")
 
 
 @app.websocket("/ws/v1/assistant")

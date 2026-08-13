@@ -10,6 +10,10 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <uses-feature android:name="android.hardware.microphone" android:required="true" />
@@ -39,14 +43,19 @@
                 <data android:scheme="smartbutler" />
             </intent-filter>
         </activity>
-
-        <!--
-            T10S 会在开机阶段先拉起原天猫桌面。收到系统开机广播后，本应用登记
-            一个延迟闹钟，由系统在桌面和网络初始化完成后拉起 MainActivity。
-            不注册 HOME，因此不会替换或破坏原天猫桌面。
-        -->
+        <service
+            android:name=".KeepAliveService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="specialUse"
+            android:stopWithTask="false">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="consumer-visible floating shortcut for reopening the voice assistant" />
+        </service>
+        <!-- 开机只启动轻量悬浮入口，不打开 MainActivity，也不替换天猫精灵桌面。 -->
         <receiver
-            android:name=".BootCompletedReceiver"
+            android:name=".OverlayBootReceiver"
             android:directBootAware="true"
             android:enabled="true"
             android:exported="true">

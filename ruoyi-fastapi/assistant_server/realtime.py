@@ -16,6 +16,8 @@ from starlette.websockets import WebSocketDisconnect
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed, InvalidStatus
 
+from .agent import AgentRequest, HouseholdAgentService
+from .agent.schemas import DecisionStatus
 from .config import Settings
 from .history import VoiceHistoryStore
 from .memory import MemoryManager
@@ -423,12 +425,14 @@ class RealtimeProxy:
         metrics: Metrics,
         history: VoiceHistoryStore,
         memory: MemoryManager,
+        agent: HouseholdAgentService,
     ) -> None:
         self.settings = settings
         self.limiter = limiter
         self.metrics = metrics
         self.history = history
         self.memory = memory
+        self.agent = agent
 
     async def run(
         self,
@@ -537,7 +541,7 @@ class RealtimeProxy:
                 writer = ClientWriter(websocket, self.settings.client_queue_size)
                 writer_task = asyncio.create_task(writer.run(), name=f"writer-{client_id}")
                 client_task = asyncio.create_task(
-                    self._client_to_upstream(websocket, upstream),
+                    self._client_to_upstream(websocket, upstream, stats, user_id),
                     name=f"client-in-{client_id}",
                 )
                 upstream_task = asyncio.create_task(
@@ -546,6 +550,7 @@ class RealtimeProxy:
                         writer,
                         stats,
                         user_id,
+                        memory_context,
                         genie_provider_available,
                     ),
                     name=f"qwen-in-{client_id}",
@@ -683,7 +688,11 @@ class RealtimeProxy:
         raise RuntimeError("千问会话初始化未完成")
 
     async def _client_to_upstream(
-        self, websocket: WebSocket, upstream: ClientConnection
+        self,
+        websocket: WebSocket,
+        upstream: ClientConnection,
+        stats: VoiceSessionStats,
+        user_id: str,
     ) -> None:
         allowed = {
             "input_audio_buffer.append",
@@ -710,6 +719,19 @@ class RealtimeProxy:
             event_type = event.get("type")
             if event_type == "ping":
                 continue
+            if event_type == "assistant.home_command.result":
+                status = str(event.get("status") or "unknown")[:40]
+                execution_id = str(event.get("execution_id") or "")[:80]
+                self.metrics.inc(f"genie_provider_result_{status}_total")
+                logger.info(
+                    "home command result: session=%s user=%s execution=%s status=%s message=%s",
+                    stats.session_id,
+                    user_id,
+                    execution_id,
+                    status,
+                    str(event.get("message") or "")[:200],
+                )
+                continue
             if event_type not in allowed:
                 continue
             if event_type == "input_audio_buffer.append":
@@ -735,6 +757,7 @@ class RealtimeProxy:
         writer: ClientWriter,
         stats: VoiceSessionStats,
         user_id: str,
+        memory_context: str,
         genie_provider_available: bool,
     ) -> None:
         seen_transcripts: set[tuple[str, str, str]] = set()
@@ -754,23 +777,25 @@ class RealtimeProxy:
                 content = str(event.get("transcript") or "").strip()
                 qwen_item_id = str(event.get("item_id") or event.get("event_id") or "")
                 home_command = extract_home_control_command(content)
-                home_key = (qwen_item_id, home_command)
+                is_home_request = self.agent.might_be_home_request(content)
+                home_key = (qwen_item_id, content)
                 if (
-                    home_command
+                    is_home_request
                     and home_key not in seen_home_commands
                     and self.settings.genie_provider_enabled
                     and genie_provider_available
                 ):
                     seen_home_commands.add(home_key)
-                    await writer.send(
-                        {
-                            "type": "assistant.home_command.pending",
-                            "command": home_command,
-                            "source": "genie_provider",
-                            "message": "正在通过本机天猫精灵执行家居指令",
-                        }
+                    asyncio.create_task(
+                        self._plan_and_dispatch_home_command(
+                            writer=writer,
+                            transcript=content,
+                            user_id=user_id,
+                            session_id=stats.session_id,
+                            memory_context=memory_context,
+                        ),
+                        name=f"home-agent-{stats.session_id[:8]}",
                     )
-                    self.metrics.inc("genie_provider_commands_total")
                 elif (
                     home_command
                     and home_key not in seen_home_commands
@@ -813,3 +838,91 @@ class RealtimeProxy:
 
             if event_type == "error":
                 self.metrics.inc("qwen_errors_total")
+
+    async def _plan_and_dispatch_home_command(
+        self,
+        *,
+        writer: ClientWriter,
+        transcript: str,
+        user_id: str,
+        session_id: str,
+        memory_context: str,
+    ) -> None:
+        await writer.send(
+            {
+                "type": "assistant.agent.planning",
+                "message": "正在结合家庭偏好与环境信息生成执行方案",
+            }
+        )
+        try:
+            decision = await asyncio.wait_for(
+                self.agent.plan(
+                    AgentRequest(
+                        transcript=transcript,
+                        user_id=user_id,
+                        session_id=session_id,
+                        location_name=self.settings.agent_location_name,
+                        memory_context=memory_context,
+                    )
+                ),
+                timeout=self.settings.agent_timeout_seconds,
+            )
+            self.metrics.inc(f"agent_{decision.status.value}_total")
+            logger.info(
+                "household agent decision: session=%s request=%s execution=%s status=%s device=%s command=%s evidence=%s",
+                session_id,
+                decision.request_id,
+                decision.execution_id,
+                decision.status.value,
+                decision.action.device if decision.action else "",
+                decision.action.command if decision.action else "",
+                ",".join(item.kind for item in decision.evidence),
+            )
+            if decision.status == DecisionStatus.EXECUTE and decision.action:
+                await writer.send(
+                    {
+                        "type": "assistant.home_command.pending",
+                        "command": decision.action.command,
+                        "execution_id": decision.execution_id,
+                        "source": "household_agent",
+                        "message": "智能管家已生成方案，正在提交给本机天猫精灵",
+                        "rationale": decision.rationale,
+                        "evidence": [
+                            {
+                                "kind": item.kind,
+                                "summary": item.summary,
+                                "source": item.source,
+                                "reliability": item.reliability,
+                                "simulated": item.simulated,
+                            }
+                            for item in decision.evidence
+                        ],
+                    }
+                )
+                self.metrics.inc("genie_provider_commands_total")
+                return
+            # The Android ContentProvider may only be invoked by an explicit
+            # EXECUTE decision.  Advice, clarification and non-applicable
+            # results must never fall through to the old raw-command path.
+            await writer.send(
+                {
+                    "type": "assistant.agent.notice",
+                    "status": decision.status.value,
+                    "message": decision.user_message,
+                }
+            )
+            return
+        except Exception:
+            logger.exception(
+                "household agent dispatch failed: session=%s",
+                session_id,
+            )
+            self.metrics.inc("agent_failures_total")
+            await writer.send(
+                {
+                    "type": "assistant.agent.notice",
+                    "status": "temporarily_unavailable",
+                    "message": "智能决策暂时不可用，本次未执行家居操作，请稍后再试。",
+                }
+            )
+            return

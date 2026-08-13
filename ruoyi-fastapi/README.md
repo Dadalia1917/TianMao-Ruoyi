@@ -1,14 +1,14 @@
 # 天猫智家实时语音服务
 
-**产品版本：v1.1.0 · 文档更新时间：2026 年 8 月 13 日 11:07:12（UTC+8）**
+**产品版本：v1.1.0 · 文档更新时间：2026 年 8 月 13 日（UTC+8）**
 
 完整的软件说明、技术栈、UML、ER 图、接口总表和部署指南请阅读仓库根目录 `README.md`。
 
-当前版本负责已登录用户的实时语音对话、六模型文字对话、自动续接和账号长期记忆。v1.1.0 新增低风险家居命令结构化事件；支持原生能力的 T10S 客户端收到事件后，通过 Android `ContentResolver` 调用本机天猫精灵 `ContentProvider`。外部天猫精灵声学转发仅作为可选兼容实验，默认关闭。当前尚未接入 Home Assistant，后续 Agent 层可在服务端独立扩展，不需要改动移动端协议。
+当前版本负责已登录用户的实时语音对话、六模型文字对话、自动续接、账号长期记忆和智能家居 Agent。v1.1.0 使用 LangGraph 单总控编排、Qwen Function Calling、确定性安全策略与环境工具，把低风险家居计划转换为结构化事件；T10S 客户端收到事件后，通过 Android `ContentResolver` 调用本机天猫精灵 `ContentProvider`。外部天猫精灵声学转发仅作为可选兼容实验，默认关闭。当前尚未接入 Home Assistant，后续可把真实设备状态工具接入现有 Agent，不需要改变移动端事件协议。
 
 ## 一键启动
 
-Python 需要 3.11 或更高版本。
+推荐 Python 3.11 或 3.12。Docker 固定使用 Python 3.11；暂不建议用 Python 3.14 运行 LangGraph/LangChain Core。
 
 ```powershell
 cd E:\无锡捷普迅智能科技有限公司\天猫精灵\天猫精灵安卓APK\RuoYi\ruoyi-fastapi
@@ -26,6 +26,8 @@ python main.py
 - 实时语音：`ws://127.0.0.1:8001/ws/v1/assistant`
 - 文字对话：`ws://127.0.0.1:8001/ws/v1/text-chat`
 - 文字模型目录：`GET http://127.0.0.1:8001/api/v1/text-models`（需要 RuoYi Token）
+- Agent 能力目录：`GET http://127.0.0.1:8001/api/v1/agent/capabilities`
+- Agent 规划调试：`POST http://127.0.0.1:8001/api/v1/agent/plan`（需要 RuoYi Token，只返回计划，不直接越过客户端执行）
 
 `main.py` 会自动读取同目录下的 `.env`；`.env` 已被 `.gitignore` 排除，API Key 不会进入源码。
 若已有语音会话表但缺少 `ai_user_memory`，服务会自动创建这张助手自管表，便于开发环境一键启动。
@@ -102,6 +104,12 @@ python main.py
 - `TEXT_CHAT_ENABLED` / `TEXT_CHAT_API_URL`：文字模型网关开关与百炼兼容接口地址。
 - `TEXT_MODEL_*`：六种文字模型的真实模型 ID。
 - `TEXT_MAX_CONNECTIONS` / `TEXT_MAX_CONNECTIONS_PER_USER`：文字请求并发上限。
+- `AGENT_ENABLED`：智能家居 Agent 总开关，默认开启。
+- `AGENT_MODEL` / `AGENT_API_URL`：用于 Function Calling 的百炼模型与兼容接口。
+- `AGENT_TIMEOUT_SECONDS` / `AGENT_MAX_TOOL_ROUNDS`：单次规划超时与最大工具轮数；限制 ReAct 循环，避免语音链路久等。
+- `AGENT_LOCATION_NAME` / `AGENT_LATITUDE` / `AGENT_LONGITUDE` / `AGENT_TIMEZONE`：天气工具所在地配置。
+- `AGENT_WEATHER_ENABLED`：空调建议是否读取实时天气。
+- `AGENT_SIMULATED_ENVIRONMENT_ENABLED`：灯光是否使用明确标记为“模拟”的室内照度；接入真实传感器后应关闭。
 
 ## 登录与记录
 
@@ -121,6 +129,27 @@ APP 的可回看历史默认保存在设备本地并按 RuoYi 用户 ID 分区�
 
 “持续待命”通过自动续接实现，并不绕过云模型的单连接上限。默认在官方 120 分钟上限前 5 分钟轮换；外部长期记忆也用于弥补模型只保留最近 100 个音频轮次或累计 600 秒上下文的限制，详见[百炼 Realtime 使用限制](https://help.aliyun.com/zh/model-studio/realtime)。H5 页面处于前台时可以持续工作；浏览器/手机系统可能暂停后台网页。后续打包 APK 若要求锁屏和后台常驻，需要增加 Android 前台服务、持续通知和相应麦克风权限合规说明。
 
-## 后续 Agent 接口边界
+## 智能家居 Agent
 
-当前记忆模块刻意不引入 LangChain/LangGraph，以降低实时链路依赖和运行开销。后续确定 Dify、LangChain 或 LangGraph 后，建议作为独立的“对话编排/工具执行”模块接在 FastAPI 服务端。移动端继续只处理音频和标准状态事件；不要把 Agent 密钥、Home Assistant Token 或工具执行逻辑放入 H5/APK。
+v1.1.0 已把 Agent 作为 FastAPI 内部独立模块落地，代码位于 `assistant_server/agent/`。架构采用一个 LangGraph 总控 Agent 和少量有边界的工具，而不是为天气、灯光、空调各启动一个会互相聊天的 Agent：这样能减少实时语音延迟、重复推理和不一致决策。
+
+```text
+Omni 最终转写
+  -> 家居意图预筛（普通聊天仍走实时直连）
+  -> LangGraph：分析 -> 风险/澄清/直接/环境规划 -> 最终校验
+  -> 天气工具或模拟照度工具
+  -> Qwen Function Calling 提交严格 ModelPlan
+  -> assistant.home_command.pending
+  -> WebView GenieBridge -> Android ContentResolver -> GenieApi
+```
+
+执行约束：
+
+- 只有最终状态为 `execute` 才会向 Android 发送指令；`advise`、`clarify`、`blocked`、`not_applicable` 和异常均不会执行。
+- 门锁、燃气、烹饪加热和安防等高风险设备在模型调用前即被确定性策略拦截。
+- 空调在用户未指定温度时先查询当地天气；灯光在没有真实传感器时使用低可信、明确标记为模拟的照度。
+- 用户明确给出的安全参数优先；长期记忆仅作为偏好参考，不能充当授权、不能覆盖本轮命令或安全规则。
+- 模型输出必须通过 Pydantic 严格结构校验、设备一致性检查和温度/亮度范围裁剪。
+- Provider 接收只能表示“已提交”，不能宣称灯或空调已经成功动作。
+
+项目只直接依赖 `langgraph`，不需要安装完整 `langchain`；测试也使用 `asyncio.run()`，不要求 `pytest-asyncio`。Dify 可保留给未来运营人员配置知识库或非实时流程，不进入当前低延迟语音控制主链路。

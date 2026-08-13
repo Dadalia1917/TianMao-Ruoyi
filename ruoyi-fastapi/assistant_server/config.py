@@ -35,6 +35,13 @@ def _as_int(name: str, default: int, minimum: int = 1) -> int:
         return default
 
 
+def _as_float(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     dashscope_api_key: str
@@ -88,6 +95,17 @@ class Settings:
     text_max_messages: int
     text_max_chars: int
     text_timeout_seconds: int
+    agent_enabled: bool
+    agent_api_url: str
+    agent_model: str
+    agent_timeout_seconds: int
+    agent_max_tool_rounds: int
+    agent_location_name: str
+    agent_latitude: float
+    agent_longitude: float
+    agent_timezone: str
+    agent_weather_enabled: bool
+    agent_simulated_environment_enabled: bool
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -182,6 +200,26 @@ class Settings:
             text_max_messages=_as_int("TEXT_MAX_MESSAGES", 30, 2),
             text_max_chars=_as_int("TEXT_MAX_CHARS", 60_000, 1000),
             text_timeout_seconds=_as_int("TEXT_TIMEOUT_SECONDS", 240, 30),
+            agent_enabled=_as_bool("AGENT_ENABLED", True),
+            agent_api_url=os.getenv(
+                "AGENT_API_URL",
+                "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+            ).strip(),
+            agent_model=os.getenv(
+                "AGENT_MODEL", "qwen3.7-plus-2026-05-26"
+            ).strip(),
+            agent_timeout_seconds=_as_int("AGENT_TIMEOUT_SECONDS", 15, 3),
+            agent_max_tool_rounds=_as_int("AGENT_MAX_TOOL_ROUNDS", 3, 1),
+            agent_location_name=os.getenv("AGENT_LOCATION_NAME", "无锡").strip()
+            or "无锡",
+            agent_latitude=_as_float("AGENT_LATITUDE", 31.4912),
+            agent_longitude=_as_float("AGENT_LONGITUDE", 120.3119),
+            agent_timezone=os.getenv("AGENT_TIMEZONE", "Asia/Shanghai").strip()
+            or "Asia/Shanghai",
+            agent_weather_enabled=_as_bool("AGENT_WEATHER_ENABLED", True),
+            agent_simulated_environment_enabled=_as_bool(
+                "AGENT_SIMULATED_ENVIRONMENT_ENABLED", True
+            ),
         )
 
     @property
@@ -225,4 +263,14 @@ class Settings:
             )
         ):
             errors.append("文字对话模型 ID 不能为空")
+        if self.agent_enabled and not self.agent_api_url.startswith(
+            ("http://", "https://")
+        ):
+            errors.append("AGENT_API_URL 必须是 http:// 或 https:// 地址")
+        if self.agent_enabled and not self.agent_model:
+            errors.append("AGENT_MODEL 不能为空")
+        if not -90 <= self.agent_latitude <= 90:
+            errors.append("AGENT_LATITUDE 必须在 -90 到 90 之间")
+        if not -180 <= self.agent_longitude <= 180:
+            errors.append("AGENT_LONGITUDE 必须在 -180 到 180 之间")
         return errors

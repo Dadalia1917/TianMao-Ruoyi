@@ -38,7 +38,7 @@
 
 版本更新时间：**2026 年 8 月 13 日 13:07:54（UTC+8）**
 
-v1.1.0 在不改变实时语音、文字对话、账号、长期记忆和运营后台既有功能的前提下，完成 T10S 本机天猫精灵 `ContentProvider` 控制链路重构。
+v1.1.0 在不改变实时语音、文字对话、账号、长期记忆和运营后台既有功能的前提下，完成 T10S 本机天猫精灵 `ContentProvider` 控制链路重构，并在 FastAPI 内落地智能家居 Agent 基线。
 
 ### 1.1 v1.1.0 功能变更
 
@@ -52,10 +52,15 @@ v1.1.0 在不改变实时语音、文字对话、账号、长期记忆和运营�
 - UI 仅反馈“已提交/提交失败”，不把 Provider 接收请求误报为设备已经执行成功。
 - 外部天猫精灵声学转发保留为可选兼容实验，但默认关闭；支持本机 Provider 时不通过扬声器唤醒另一台设备。
 - Docker Compose、FastAPI 服务版本、uni-app、Android 原生工程和隐私协议统一升级至 v1.1.0。
+- 新增 `assistant_server/agent/`：使用 LangGraph `StateGraph` 实现“分析、风险分流、环境取证、Function Calling、最终校验”的单总控工作流。普通对话仍直连 Qwen3.5 Omni，只有家居操作意图才进入 Agent，避免增加所有语音请求的延迟。
+- 空调在用户未指定温度时先获取当地天气再推荐 16～30℃ 范围内的参数；灯光在尚无真实传感器时使用明确标记为模拟、低可信的照度数据推荐 1%～100% 亮度。用户明确给出的安全参数不会被偏好记忆擅自覆盖。
+- Agent 通过 Qwen Function Calling 调用有界工具并生成严格 Pydantic 计划；只有 `execute` 状态能触发 T10S，建议、澄清、拦截、不适用或规划异常均不执行。
+- 长期记忆作为偏好参考注入 Agent，但不能作为权限授权、设备实况或安全规则；全部工具调用、证据和最终决策保留结构化日志字段，便于后续审计。
+- 当前采用“一个总控 Agent + 有界工具”，没有拆成多个互相对话的 Agent。Dify 仅作为未来知识库/非实时运营流程的可选补充，不进入实时语音主链路。
 
 ### 1.2 v1.1.0 验证与产物
 
-- FastAPI 自动化测试通过：39 项（包含多类家居自然表达与高风险拦截）。
+- FastAPI 自动化测试通过：46 项（包含多类家居自然表达、高风险拦截、天气温度推荐、模拟照度推荐和用户明确参数优先）。
 - uni-app H5 生产构建通过。
 - Android Release 构建与 APK 签名验证通过；包名保持 `com.jpx.tmallsmarthome`，`versionCode=110`，便于覆盖升级 v1.0.0。
 - Docker Compose 配置校验通过。
@@ -101,11 +106,11 @@ v1.1.0 在不改变实时语音、文字对话、账号、长期记忆和运营�
 
 - 图片、文件或摄像头附件上传。
 - Home Assistant 通用接入、设备状态闭环、复杂自动化场景以及门锁、燃气、安防等高风险操作。
-- Dify、LangChain、LangGraph Agent 编排。
+- 当前 v1.1.0 之后新增的 LangGraph Agent 基线不属于 v1.0.0 历史范围；Dify 可视化工作流和 Home Assistant 工具仍未接入。
 - 天猫精灵技能平台的正式发布配置及硬件厂商侧唤醒链路。
 - 应用商店发布、生产域名和生产证书。
 
-上述能力属于后续版本范围；当前接口和模块边界已为 Agent 与 Home Assistant 接入预留空间。
+以上内容是 v1.0.0 的历史范围说明。v1.1.0 已落地 LangGraph Agent 基线与 T10S Provider 指令闭环；Home Assistant、真实传感器和生产发布仍属于后续版本范围。
 
 > 2026 年 8 月 13 日补充：已在 T10S 上用普通第三方 APK 身份验证 `com.alibaba.ailabs.genie.assistant.provider/GenieApi` 可由 `ContentResolver.insert()` 直接提交文字指令，不要求 root、运行时 ADB、终端或无障碍权限。ADB 的 `content insert` 只用于开发期验证同一个 Android API。当前主应用源码、FastAPI 测试、H5 构建和 Android Debug 构建已通过；由于目标 T10S 暂不在现场，集成后的主应用仍需补一次真机端到端验收。Provider 接受指令不等于设备必然执行成功，因此 UI 和模型只能表述“已提交/正在处理”。
 
@@ -756,7 +761,8 @@ erDiagram
 | 浏览器音频 | Web Audio API、WebSocket | PCM 16-bit 单声道；输入 16kHz，输出 24kHz |
 | 运营后台 | Vue 3、Vite、Element Plus、Pinia、Axios、ECharts | Vue 3.5.26、Vite 6.4.3、Element Plus 2.13.1 |
 | Java 服务 | Java、Spring Boot、Spring Security、MyBatis、Druid | Java 17、Spring Boot 4.0.6、MyBatis Starter 4.0.1 |
-| AI 网关 | Python、FastAPI、Uvicorn、websockets、httpx、aiomysql | Python 3.11+；FastAPI 0.115+ |
+| AI 网关 | Python、FastAPI、Uvicorn、websockets、httpx、aiomysql | 推荐 Python 3.11/3.12；Docker 使用 Python 3.11；FastAPI 0.115+ |
+| 智能家居 Agent | LangGraph StateGraph、Pydantic、Qwen Function Calling | 单总控 + 有界工具；天气实时数据 + 模拟照度；确定性安全校验 |
 | 实时模型 | Qwen3.5 Omni Realtime | qwen3.5-omni-plus-realtime，默认音色 Ethan |
 | 文字模型 | Qwen / DeepSeek | 6 个可配置模型 |
 | 记忆提取 | 阿里云百炼兼容接口 | 默认 qwen-plus |
@@ -858,7 +864,7 @@ RuoYi/
 - Maven 3.9+
 - MySQL 8.0+
 - Redis 6.0+
-- Python 3.11+
+- Python 3.11 或 3.12（推荐；当前 LangChain Core 暂不建议 Python 3.14）
 - Node.js 20+ 与 npm
 - HBuilderX 5.23 或兼容版本
 
@@ -991,7 +997,7 @@ smartbutler://voice
 - 记忆提取使用独立队列和 Worker，不阻塞用户关闭会话。
 - Java 认证结果支持短时缓存，但 Token 的权威来源仍是 RuoYi。
 - FastAPI 不依赖 Java 内部类；只通过 <code>/getInfo</code> 和共享的数据模型边界协作。
-- Home Assistant 或 Agent 后续应作为新的工具/编排层接入，不应把设备协议写进音频代理核心。
+- Agent 已作为独立编排层接入，设备协议仍留在 Android 原生桥；Home Assistant 后续以工具适配器接入，不把设备协议写进音频代理核心。
 
 生产扩容建议：
 
@@ -1069,12 +1075,12 @@ npm run build:prod
 - 正式域名、Caddy 自动 HTTPS/WSS、日志轮转和监控告警。
 - 记忆命中率、提取延迟和用户纠错机制优化。
 
-### v1.2.x：Agent 与智能家居
+### v1.2.x：Agent 与智能家居深化
 
-- 对比 Dify、LangChain、LangGraph 后确定 Agent 编排方案。
-- 设计工具调用权限、确认机制、审计和幂等控制。
-- 在现有 T10S 低风险文字指令通道之外接入 Home Assistant 服务层。
-- 增加设备状态查询、执行结果闭环、权限确认和复杂自动化场景。
+- 在现有 LangGraph 单总控与 Function Calling 基线上接入 Home Assistant 工具适配器。
+- 增加真实室内照度、温湿度、人体存在等传感器数据，替换当前模拟环境值。
+- 增加设备状态查询、执行结果闭环、幂等键、分级确认和复杂自动化场景。
+- 评估将 Dify 用于知识库与非实时运营流程，但保持实时语音控制主链路独立。
 
 ### 长期方向
 

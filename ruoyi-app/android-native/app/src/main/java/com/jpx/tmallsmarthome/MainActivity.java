@@ -3,17 +3,22 @@ package com.jpx.tmallsmarthome;
 import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
-import android.content.pm.PackageManager;
 import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.os.Build;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
 import android.webkit.PermissionRequest;
+import android.webkit.RenderProcessGoneDetail;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.FrameLayout;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -22,48 +27,89 @@ import java.util.List;
 // device compatibility and intentionally isolated in this native shell.
 @SuppressWarnings("deprecation")
 public class MainActivity extends Activity {
-    public static final String EXTRA_STARTED_AFTER_BOOT = "started_after_boot";
-    public static final String EXTRA_BOOT_ATTEMPT = "boot_attempt";
+    public static final String ACTION_OPEN_FROM_OVERLAY =
+            "com.jpx.tmallsmarthome.OPEN_FROM_OVERLAY";
+    public static final String EXTRA_OPENED_FROM_OVERLAY = "opened_from_overlay";
+
+    private static final String TAG = "TmallSmartHome";
     private static final int REQUEST_AUDIO_PERMISSION = 1001;
     private static final String START_URL = "file:///android_asset/index.html";
-    private static final String PREFS = "tmall_smart_home_prefs";
     private static final String PRIVACY_ACCEPTED = "privacy_accepted_v1";
 
+    private FrameLayout webContainer;
     private WebView webView;
     private PermissionRequest pendingWebPermission;
+    private boolean pageLoaded;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        recordBootLaunch(getIntent());
         requestWindowFeature(Window.FEATURE_NO_TITLE);
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN,
                 WindowManager.LayoutParams.FLAG_FULLSCREEN);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         enterImmersiveMode();
 
-        webView = new WebView(this);
-        setContentView(webView);
-        configureWebView();
+        webContainer = new FrameLayout(this);
+        setContentView(webContainer);
+        createWebView();
 
         if (getPreferences(MODE_PRIVATE).getBoolean(PRIVACY_ACCEPTED, false)) {
-            webView.loadUrl(START_URL);
+            loadStartPage();
         } else {
             showPrivacyDialog();
         }
+        handleForegroundIntent(getIntent());
     }
 
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
-        recordBootLaunch(intent);
+        handleForegroundIntent(intent);
     }
 
-    private void recordBootLaunch(Intent intent) {
-        if (intent != null && intent.getBooleanExtra(EXTRA_STARTED_AFTER_BOOT, false)) {
-            StartupDiagnostics.recordAppStarted(this);
+    @Override
+    protected void onResume() {
+        super.onResume();
+        enterImmersiveMode();
+        KeepAliveService.request(this, KeepAliveService.ACTION_APP_FOREGROUND);
+        resumeWebRuntime("activity_resume");
+    }
+
+    @Override
+    protected void onStop() {
+        if (webView != null) {
+            webView.onPause();
         }
+        KeepAliveService.request(this, KeepAliveService.ACTION_APP_BACKGROUND);
+        super.onStop();
+    }
+
+    private void handleForegroundIntent(Intent intent) {
+        boolean fromOverlay = intent != null
+                && (ACTION_OPEN_FROM_OVERLAY.equals(intent.getAction())
+                || intent.getBooleanExtra(EXTRA_OPENED_FROM_OVERLAY, false));
+        Log.i(TAG, "foreground intent: source=" + (fromOverlay ? "overlay" : "launcher"));
+        if (webView == null && webContainer != null) {
+            createWebView();
+        }
+        if (!pageLoaded && webView != null
+                && getPreferences(MODE_PRIVATE).getBoolean(PRIVACY_ACCEPTED, false)) {
+            loadStartPage();
+        }
+        resumeWebRuntime(fromOverlay ? "overlay" : "intent");
+    }
+
+    private void createWebView() {
+        if (webContainer == null || webView != null) {
+            return;
+        }
+        webView = new WebView(this);
+        webContainer.addView(webView, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT));
+        configureWebView();
     }
 
     private void configureWebView() {
@@ -87,6 +133,27 @@ public class MainActivity extends Activity {
                 // Keep the privileged bridge confined to the bundled, trusted UI.
                 return url == null || !url.startsWith("file:///android_asset/");
             }
+
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                pageLoaded = true;
+                dispatchForegroundEvent("page_finished");
+            }
+
+            @Override
+            public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+                    return false;
+                }
+                Log.e(TAG, "WebView renderer exited; recreating runtime. crashed="
+                        + detail.didCrash());
+                runOnUiThread(() -> {
+                    destroyWebView();
+                    createWebView();
+                    loadStartPage();
+                });
+                return true;
+            }
         });
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
@@ -103,6 +170,40 @@ public class MainActivity extends Activity {
         });
     }
 
+    private void loadStartPage() {
+        if (webView == null) {
+            return;
+        }
+        pageLoaded = false;
+        webView.loadUrl(START_URL);
+    }
+
+    private void resumeWebRuntime(String source) {
+        if (webView == null) {
+            return;
+        }
+        webView.onResume();
+        webView.resumeTimers();
+        webView.requestFocus(View.FOCUS_DOWN);
+        webView.invalidate();
+        dispatchForegroundEvent(source);
+    }
+
+    private void dispatchForegroundEvent(String source) {
+        if (webView == null || !pageLoaded) {
+            return;
+        }
+        String safeSource = source == null ? "unknown"
+                : source.replace("\\", "\\\\").replace("'", "\\'");
+        webView.evaluateJavascript(
+                "(function(){"
+                        + "window.dispatchEvent(new CustomEvent('tmallAppForeground',"
+                        + "{detail:{source:'" + safeSource + "'}}));"
+                        + "window.dispatchEvent(new Event('focus'));"
+                        + "})();",
+                null);
+    }
+
     private void handleWebPermissionRequest(PermissionRequest request) {
         List<String> allowed = new ArrayList<>();
         for (String resource : request.getResources()) {
@@ -114,23 +215,27 @@ public class MainActivity extends Activity {
             request.deny();
             return;
         }
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+                == PackageManager.PERMISSION_GRANTED) {
             request.grant(allowed.toArray(new String[0]));
             return;
         }
         pendingWebPermission = request;
-        requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQUEST_AUDIO_PERMISSION);
+        requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},
+                REQUEST_AUDIO_PERMISSION);
     }
 
     @Override
-    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+    public void onRequestPermissionsResult(int requestCode, String[] permissions,
+                                           int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode != REQUEST_AUDIO_PERMISSION || pendingWebPermission == null) {
             return;
         }
         PermissionRequest request = pendingWebPermission;
         pendingWebPermission = null;
-        if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+        if (grantResults.length > 0
+                && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
             request.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
         } else {
             request.deny();
@@ -143,8 +248,9 @@ public class MainActivity extends Activity {
                 .setMessage("欢迎使用天猫智家语音助手。实时语音功能需要使用麦克风，并通过网络将语音发送至云端完成识别与回复；当您明确要求控制低风险家居设备时，App 会把必要的设备指令提交给本机天猫精灵处理。当前版本默认不保存原始音频。继续使用即表示您同意《用户服务协议》和《隐私政策》。")
                 .setCancelable(false)
                 .setPositiveButton("同意并继续", (dialog, which) -> {
-                    getPreferences(MODE_PRIVATE).edit().putBoolean(PRIVACY_ACCEPTED, true).apply();
-                    webView.loadUrl(START_URL);
+                    getPreferences(MODE_PRIVATE).edit()
+                            .putBoolean(PRIVACY_ACCEPTED, true).apply();
+                    loadStartPage();
                 })
                 .setNegativeButton("暂不同意", (dialog, which) -> finish())
                 .show();
@@ -173,20 +279,30 @@ public class MainActivity extends Activity {
         if (webView != null && webView.canGoBack()) {
             webView.goBack();
         } else {
-            super.onBackPressed();
+            moveTaskToBack(true);
         }
+    }
+
+    private void destroyWebView() {
+        WebView current = webView;
+        webView = null;
+        pageLoaded = false;
+        if (current == null) {
+            return;
+        }
+        if (webContainer != null) {
+            webContainer.removeView(current);
+        }
+        current.stopLoading();
+        current.removeJavascriptInterface("GenieBridge");
+        current.setWebChromeClient(null);
+        current.setWebViewClient(null);
+        current.destroy();
     }
 
     @Override
     protected void onDestroy() {
-        if (webView != null) {
-            webView.stopLoading();
-            webView.removeJavascriptInterface("GenieBridge");
-            webView.setWebChromeClient(null);
-            webView.setWebViewClient(null);
-            webView.destroy();
-            webView = null;
-        }
+        destroyWebView();
         super.onDestroy();
     }
 }

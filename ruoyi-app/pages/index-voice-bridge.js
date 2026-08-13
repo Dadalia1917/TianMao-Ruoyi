@@ -170,6 +170,13 @@
           this.executeHomeCommand(event)
           return
         }
+        if (type === 'assistant.agent.planning' || type === 'assistant.agent.notice') {
+          this.emit({
+            type: type === 'assistant.agent.planning' ? 'agent.planning' : 'agent.notice',
+            message: event.message || ''
+          })
+          return
+        }
         if (type === 'input_audio_buffer.speech_started') {
           // 声学转发期间，本机扬声器和附近天猫精灵的回应都不能回灌给 Omni。
           if (this.captureSuppressed) return
@@ -404,12 +411,26 @@
           return false
         }
       },
+      sendHomeCommandResult(event, status, message, command) {
+        if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return
+        try {
+          this.socket.send(JSON.stringify({
+            type: 'assistant.home_command.result',
+            execution_id: String((event && event.execution_id) || ''),
+            status,
+            message: String(message || ''),
+            command: String(command || '')
+          }))
+        } catch (error) {}
+      },
       executeHomeCommand(event) {
         const command = String((event && event.command) || '').trim()
         if (!command || !this.hasGenieProvider()) {
+          const message = '当前设备未提供天猫精灵本机控制通道'
+          this.sendHomeCommandResult(event, 'rejected', message, command)
           this.emit({
             type: 'home.command.failed',
-            message: '当前设备未提供天猫精灵本机控制通道'
+            message
           })
           return
         }
@@ -434,12 +455,24 @@
           if (!result || result.accepted !== true) {
             throw new Error((result && result.message) || '天猫精灵未接受该指令')
           }
+          this.sendHomeCommandResult(
+            event,
+            'accepted_unverified',
+            result.message || '指令已提交给天猫精灵',
+            command
+          )
           this.emit({
             type: 'home.command.accepted',
             command,
             message: result.message || '指令已提交给天猫精灵'
           })
         } catch (error) {
+          this.sendHomeCommandResult(
+            event,
+            'rejected',
+            `家居指令提交失败：${error.message || error}`,
+            command
+          )
           this.resetAcousticRelay()
           this.emit({
             type: 'home.command.failed',
