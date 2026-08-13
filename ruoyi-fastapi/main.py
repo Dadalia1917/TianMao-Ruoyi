@@ -27,7 +27,7 @@ from assistant_server.text_chat import TextChatError, TextChatService
 
 
 BASE_DIR = Path(__file__).resolve().parent
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 load_local_env(BASE_DIR / ".env")
 settings = Settings.from_env()
 
@@ -241,7 +241,17 @@ async def assistant_socket(websocket: WebSocket) -> None:
         await websocket.close(code=4401)
         return
     client_id = str(hello.get("client_id") or "mobile")[:80]
-    await websocket.app.state.proxy.run(websocket, user_id, client_id)
+    capabilities = hello.get("capabilities")
+    genie_provider_available = bool(
+        isinstance(capabilities, dict)
+        and capabilities.get("genie_provider") is True
+    )
+    await websocket.app.state.proxy.run(
+        websocket,
+        user_id,
+        client_id,
+        genie_provider_available=genie_provider_available,
+    )
 
 
 @app.websocket("/ws/v1/text-chat")

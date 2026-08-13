@@ -8,28 +8,28 @@ def releaseKeyPassword = System.getenv("TMALL_KEY_PASSWORD") ?: releaseStorePass
 def releaseKeyAlias = System.getenv("TMALL_KEY_ALIAS") ?: "tmall-smart-home"
 
 android {
-    namespace "com.jpx.tmallsmarthome"
-    compileSdk 37
+    namespace = "com.jpx.tmallsmarthome"
+    compileSdk = 37
 
     defaultConfig {
-        applicationId "com.jpx.tmallsmarthome"
-        minSdk 23
-        targetSdk 35
-        versionCode 100
-        versionName "1.0.0"
+        applicationId = "com.jpx.tmallsmarthome"
+        minSdk = 23
+        targetSdk = 35
+        versionCode = 110
+        versionName = "1.1.0"
     }
 
     buildFeatures {
-        buildConfig true
+        buildConfig = true
     }
 
     signingConfigs {
         release {
             if (releaseStore) {
-                storeFile file(releaseStore)
-                storePassword releaseStorePassword
-                keyAlias releaseKeyAlias
-                keyPassword releaseKeyPassword
+                storeFile = file(releaseStore)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
             }
         }
     }
@@ -40,9 +40,9 @@ android {
             versionNameSuffix "-debug"
         }
         release {
-            minifyEnabled false
-            shrinkResources false
-            signingConfig signingConfigs.release
+            minifyEnabled = false
+            shrinkResources = false
+            signingConfig = signingConfigs.release
             proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
         }
     }

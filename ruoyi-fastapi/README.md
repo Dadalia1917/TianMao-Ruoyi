@@ -1,10 +1,10 @@
 # 天猫智家实时语音服务
 
-**产品版本：v1.0.0 · 文档日期：2026 年 8 月 11 日**
+**产品版本：v1.1.0 · 文档更新时间：2026 年 8 月 13 日 11:07:12（UTC+8）**
 
 完整的软件说明、技术栈、UML、ER 图、接口总表和部署指南请阅读仓库根目录 `README.md`。
 
-当前版本负责已登录用户的实时语音对话、六模型文字对话、自动续接和账号长期记忆，尚未直接接入 Home Assistant。过渡阶段可开启“外部天猫精灵声学转发”：模型把明确的低风险家居请求规范化为“天猫精灵，打开卧室灯”一类短命令，由本机扬声器转达给附近另一台天猫精灵；它不等同于可靠的设备控制，也不会伪造执行结果。后续 Agent 层可在服务端独立扩展，不需要改动移动端协议。
+当前版本负责已登录用户的实时语音对话、六模型文字对话、自动续接和账号长期记忆。v1.1.0 新增低风险家居命令结构化事件；支持原生能力的 T10S 客户端收到事件后，通过 Android `ContentResolver` 调用本机天猫精灵 `ContentProvider`。外部天猫精灵声学转发仅作为可选兼容实验，默认关闭。当前尚未接入 Home Assistant，后续 Agent 层可在服务端独立扩展，不需要改动移动端协议。
 
 ## 一键启动
 
@@ -43,7 +43,7 @@ python main.py
 
 ## 常见开发问题
 
-- `GET /api/v1/memories 404`：通常是修改源码后仍在运行旧 FastAPI 进程。结束原来的 `main.py`，重新启动后确认根接口返回当前产品版本 `1.0.0`，并在 `/docs` 中看到记忆路由。`OPTIONS 200` 只说明 CORS 中间件响应正常，不能证明业务路由已加载。
+- `GET /api/v1/memories 404`：通常是修改源码后仍在运行旧 FastAPI 进程。结束原来的 `main.py`，重新启动后确认根接口返回当前产品版本 `1.1.0`，并在 `/docs` 中看到记忆路由。`OPTIONS 200` 只说明 CORS 中间件响应正常，不能证明业务路由已加载。
 - 浏览器提示 `ScriptProcessorNode is deprecated`：这是 AudioWorklet 静态文件未加载时的兼容回退警告，不会中断语音。停止并重新运行 HBuilderX H5、执行一次强制刷新；当前页面会尝试应用路径、站点根路径和 Blob 三种方式加载 AudioWorklet。
 
 ## 实时链路
@@ -90,7 +90,8 @@ python main.py
 - `MAX_CONNECTIONS`：单进程并发 WebSocket 上限，默认 300。
 - `MAX_CONNECTIONS_PER_USER`：单账号会话上限，默认 3。
 - `UPSTREAM_ROTATE_SECONDS`：千问单连接主动轮换时间，默认 6900 秒；客户端会自动续接。
-- `ACOUSTIC_RELAY_ENABLED`：是否启用外部天猫精灵声学转发实验功能，默认开启；接入 Home Assistant 后应关闭。
+- `GENIE_PROVIDER_ENABLED`：是否向声明支持本机天猫精灵 Provider 的客户端发送低风险家居命令事件，默认开启。
+- `ACOUSTIC_RELAY_ENABLED`：是否启用外部天猫精灵声学转发实验功能，默认关闭；只有本机 Provider 不可用且明确需要兼容实验时才开启。
 - `ACOUSTIC_RELAY_WAKE_PHRASE`：外部设备唤醒词，默认 `天猫精灵`。
 - `RUOYI_AUTH_URL`：RuoYi 的 `/getInfo` 完整地址；每次语音建连都必须通过账号校验。
 - `DATABASE_ENABLED`：是否启用 MySQL；`MEMORY_ENABLED=true` 时必须开启。

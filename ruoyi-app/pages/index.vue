@@ -685,6 +685,12 @@
           case 'assistant.thinking': this.status = 'thinking'; break
           case 'assistant.speaking': this.status = 'speaking'; break
           case 'relay.started': this.status = 'speaking'; break
+          case 'home.command.started': this.status = 'thinking'; break
+          case 'home.command.accepted': this.status = 'speaking'; break
+          case 'home.command.failed':
+            if (this.isActive) this.status = 'listening'
+            uni.showToast({ title: event.message || '家居指令提交失败', icon: 'none', duration: 3200 })
+            break
           case 'playback.done': if (this.isActive) this.status = 'listening'; break
           case 'user.text': this.appendUserMessage(event.text); break
           case 'assistant.text': this.updateAssistantMessage(event.text, Boolean(event.final)); break

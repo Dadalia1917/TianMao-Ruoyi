@@ -2,24 +2,24 @@
 
 > **Tmall Smart Home Qwen Voice Assistant**
 
-面向天猫智慧工控屏、Android 终端和 H5 的实时语音助手系统。项目在 RuoYi 前后端分离框架基础上，接入阿里云百炼 Qwen3.5 Omni 实时语音模型，提供账号体系、实时双向语音、文字对话、跨会话长期记忆、消费者端应用和运营管理后台。
+面向天猫智慧工控屏、Android 终端和 H5 的实时语音助手系统。项目在 RuoYi 前后端分离框架基础上，接入阿里云百炼 Qwen3.5 Omni 实时语音模型，提供账号体系、实时双向语音、文字对话、跨会话长期记忆、T10S 本机低风险智能家居指令、消费者端应用和运营管理后台。
 
 | 项目属性 | 当前值 |
 | --- | --- |
 | 产品名称 | 天猫智家·千问智能语音助手 |
 | English name | Tmall Smart Home Qwen Voice Assistant |
-| 产品版本 | **v1.0.0** |
-| 发布日期 | **2026 年 8 月 11 日** |
-| 当前阶段 | v1.0.0 正式 APK 已构建并通过天猫精灵智慧屏 T10S 真机联调 |
+| 产品版本 | **v1.1.0** |
+| 版本更新时间 | **2026 年 8 月 13 日 11:07:12（UTC+8）** |
+| 当前阶段 | v1.1.0 签名 APK 已完成构建；T10S ContentProvider 已完成独立探针真机验证和主应用集成，待目标设备回到现场后补主链路验收 |
 | 适用终端 | 天猫智慧工控屏、Android、桌面 H5 |
 | 开发单位 | 无锡捷普迅智能科技有限公司 |
 | 基础框架 | RuoYi 3.9.2 派生工程 |
 
-> 版本说明：**v1.0.0 是本产品版本**；Maven 和 ruoyi-ui 中的 3.9.2 是继承的 RuoYi 工程/依赖版本，两者含义不同，不应互相替换。
+> 版本说明：**v1.1.0 是本产品版本**；Maven 和 ruoyi-ui 中的 3.9.2 是继承的 RuoYi 工程/依赖版本，两者含义不同，不应互相替换。
 
 ## 文档导航
 
-- [v1.0.0 更新说明](#1-v100-更新说明)
+- [v1.1.0 更新说明](#1-v110-更新说明)
 - [软件说明与需求](#2-软件说明)
 - [UML 用例图](#4-uml-用例图)
 - [总体架构与软件工程图](#5-总体架构)
@@ -34,19 +34,46 @@
 
 ---
 
-## 1. v1.0.0 更新说明
+## 1. v1.1.0 更新说明
+
+版本更新时间：**2026 年 8 月 13 日 11:07:12（UTC+8）**
+
+v1.1.0 在不改变实时语音、文字对话、账号、长期记忆和运营后台既有功能的前提下，完成 T10S 本机天猫精灵 `ContentProvider` 控制链路重构。
+
+### 1.1 v1.1.0 功能变更
+
+- FastAPI 从 Omni 最终语音转写中识别明确、低风险的灯、空调、窗帘、电视、风扇、空气净化器和普通插座控制请求，并向具备原生能力的客户端发送结构化事件。
+- uni-app 通过可信本地 WebView 的 `GenieBridge` 把结构化命令交给 Android 原生层；H5 浏览器不会声明或调用该设备能力。
+- Android 原生层使用 `ContentResolver.insert()` 调用 `content://com.alibaba.ailabs.genie.assistant.provider/GenieApi`，不在运行时进入终端、不执行 ADB、不要求 root 或无障碍权限。
+- 服务端与 Android 原生层均执行低风险白名单校验；门锁、燃气、热水器、车库、监控、布撤防等高风险请求以及含糊、否定、询问状态类语句不会下发。
+- UI 仅反馈“已提交/提交失败”，不把 Provider 接收请求误报为设备已经执行成功。
+- 外部天猫精灵声学转发保留为可选兼容实验，但默认关闭；支持本机 Provider 时不通过扬声器唤醒另一台设备。
+- Docker Compose、FastAPI 服务版本、uni-app、Android 原生工程和隐私协议统一升级至 v1.1.0。
+
+### 1.2 v1.1.0 验证与产物
+
+- FastAPI 自动化测试通过：28 项。
+- uni-app H5 生产构建通过。
+- Android Release 构建与 APK 签名验证通过；包名保持 `com.jpx.tmallsmarthome`，`versionCode=110`，便于覆盖升级 v1.0.0。
+- Docker Compose 配置校验通过。
+- 正式安装包：`ruoyi-app/apk/天猫智家语音助手-v1.1.0.apk`。
+- APK SHA-256：`3FD634E5CFD571A61008D926F0F49A298216356CE52510E8948F18357AE2D188`。
+- 独立普通第三方探针 APK 已在 T10S 验证 Provider 可调用；由于目标 T10S 暂不在现场，v1.1.0 主应用“语音 → 结构化事件 → 原生桥 → Provider”仍需补一次真机端到端验收。
+
+### 1.3 v1.0.0 历史基线
 
 发布日期：**2026 年 8 月 11 日**
 
 本版本形成了可继续交付给 Claude Code、Cursor 或其他开发人员维护的首个软件工程基线。
 
-### 1.1 消费者端
+#### v1.0.0 消费者端
 
 - 完成“天猫智家”统一品牌、登录、注册、用户服务协议和隐私政策页面。
 - 登录身份在本机保留；连续 30 天未打开应用后要求重新登录。
 - 登录后进入 Qwen3.5 Omni 实时语音助手，支持自动连接、持续待命、服务端 VAD、语音打断、实时转写和语音播报。
 - 支持“天猫管家”唤醒语义；单独说出唤醒词时固定回复“姥爷，我在”。
-- 增加可配置的“外部天猫精灵声学转发”实验能力：识别到明确、低风险的开关灯或空调指令时，Qwen3.5 Omni 可播报“天猫精灵，……”以唤醒附近的另一台设备；转发期间暂停麦克风上行，避免应用把自己的播报再次识别成用户指令。
+- 增加 T10S 本机智能家居控制链路：服务端从最终语音转写中提取明确、低风险的灯、空调、窗帘等指令，经 WebSocket 结构化事件交给 Android 原生桥，再由 `ContentResolver` 调用天猫精灵导出的 `ContentProvider`。
+- 保留可配置的“外部天猫精灵声学转发”作为兼容回退，默认关闭；本机 Provider 可用时不再让 Omni 通过扬声器喊另一台设备。
 - 用户询问模型身份时如实回答当前模型身份，不用应用品牌冒充基础模型。
 - 支持本机语音会话记录、搜索、详情查看和删除。
 - 支持按账号隔离的跨会话长期记忆，并提供查看和删除入口。
@@ -56,7 +83,7 @@
 - 已生成独立签名的 Android 正式包 `天猫智家语音助手-v1.0.0.apk`，包名为 `com.jpx.tmallsmarthome`。
 - 已在 Android 10、1280×800、arm64-v8a 的天猫精灵智慧屏 T10S 上完成安装、登录、麦克风、实时 WebSocket 和语音回复验收。
 
-### 1.2 服务端与运营后台
+#### v1.0.0 服务端与运营后台
 
 - 新增独立 FastAPI AI 网关，负责百炼实时 WebSocket 转发、文字模型流式响应、认证校验、限流、持久化和长期记忆。
 - Java 服务继续承担 RuoYi 账号、权限、验证码、注册、审计和运营查询。
@@ -67,17 +94,17 @@
 - FastAPI 支持进程级连接上限、单账号连接上限、异步数据库写队列、健康检查和 Prometheus 文本指标。
 - 完成阿里云 ECS Docker Compose 部署；Android 本地 WebView 的空 Origin、`file://` Origin 与回环开发来源可安全通过握手，账号身份仍由 RuoYi Token 校验。
 
-### 1.3 本版本明确不包含
+#### v1.0.0 明确不包含
 
 - 图片、文件或摄像头附件上传。
-- Home Assistant、家具/工控设备控制和自动化场景。
+- Home Assistant 通用接入、设备状态闭环、复杂自动化场景以及门锁、燃气、安防等高风险操作。
 - Dify、LangChain、LangGraph Agent 编排。
 - 天猫精灵技能平台的正式发布配置及硬件厂商侧唤醒链路。
 - 应用商店发布、生产域名和生产证书。
 
 上述能力属于后续版本范围；当前接口和模块边界已为 Agent 与 Home Assistant 接入预留空间。
 
-> 2026 年 8 月 12 日补充：声学转发只是本地可开关的过渡实验，不等同于应用已接入或直接控制智能家居。应用不会把播报行为描述为“灯已经打开”，也不转发门锁、燃气、安防等高风险操作；实际执行结果以外部天猫精灵及其绑定设备为准。目前仅完成本地源码、运行配置和自动化测试，尚未在不在场的 T10S 上重新构建、安装或验收。
+> 2026 年 8 月 13 日补充：已在 T10S 上用普通第三方 APK 身份验证 `com.alibaba.ailabs.genie.assistant.provider/GenieApi` 可由 `ContentResolver.insert()` 直接提交文字指令，不要求 root、运行时 ADB、终端或无障碍权限。ADB 的 `content insert` 只用于开发期验证同一个 Android API。当前主应用源码、FastAPI 测试、H5 构建和 Android Debug 构建已通过；由于目标 T10S 暂不在现场，集成后的主应用仍需补一次真机端到端验收。Provider 接受指令不等于设备必然执行成功，因此 UI 和模型只能表述“已提交/正在处理”。
 
 ---
 
@@ -91,7 +118,8 @@
 2. 应用读取本机有效登录身份并进入语音助手。
 3. 麦克风音频实时发送至 Qwen3.5 Omni。
 4. 模型返回文字和 PCM 音频，客户端实时播报。
-5. 会话结束后提取稳定偏好或事实，供下一次新会话使用。
+5. 明确的低风险家居控制转为结构化事件，并在 T10S 本机提交给天猫精灵处理。
+6. 会话结束后提取稳定偏好或事实，供下一次新会话使用。
 
 系统面向消费者，因此 API 地址、密钥、模型网关等技术参数不在普通用户界面暴露，由部署人员统一配置。
 
@@ -116,10 +144,11 @@
 | 本机对话记录 | 已实现 | 客户端按账号隔离 |
 | 跨会话长期记忆 | 已实现 | MySQL 按账号隔离 |
 | 多模型文字对话 | 已实现 | FastAPI 流式代理 |
+| T10S 低风险家居指令提交 | 已实现，待主应用最终真机验收 | Android JSBridge + 天猫精灵 ContentProvider |
 | 运营后台 | 已实现 | Vue 3 + Java |
 | 原始录音保存 | 不实现 | 默认不落盘 |
 | 图片/附件 | 不实现 | 无 |
-| 家具控制/Home Assistant | 后续版本 | 预留 Agent/工具层 |
+| Home Assistant、设备状态闭环与复杂场景 | 后续版本 | 预留 Agent/工具层 |
 
 ---
 
@@ -137,6 +166,8 @@
 - FR-08：管理员可查询会话、记忆、用户和审计日志。
 - FR-09：文字对话可选择已配置模型并以流式方式展示思考摘要和最终回答。
 - FR-10：消费者端不展示服务地址、API Key 或数据库配置。
+- FR-11：Android 客户端声明本机 Provider 能力后，明确的低风险家居指令应通过结构化事件提交给天猫精灵；H5 不得伪装具备该能力。
+- FR-12：门锁、燃气、安防等高风险操作及含糊指令不得跨越原生控制边界。
 
 ### 3.2 非功能需求
 
@@ -148,6 +179,7 @@
 - NFR-06 可移植性：同一消费者端源码可输出 H5，并通过 Android Studio 原生容器生成 Android 正式 APK。
 - NFR-07 可观测性：服务日志、运营统计、健康接口和 Prometheus 指标可用。
 - NFR-08 响应式：适配桌面 H5、横屏工控屏和移动端。
+- NFR-09 最小权限：运行时不执行 ADB、不进入终端、不申请 root；服务端和 Android 原生层分别校验一次家居指令。
 
 ---
 
@@ -161,6 +193,7 @@ flowchart LR
     Admin["参与者：平台管理员/运营人员"]
     Launcher["参与者：天猫精灵或系统启动器"]
     Bailian["外部系统：阿里云百炼"]
+    GenieProvider["外部系统：T10S 天猫精灵 Provider"]
 
     subgraph System["天猫智家·千问智能语音助手"]
         UC_Login(["登录/注册与30天身份保持"])
@@ -170,6 +203,7 @@ flowchart LR
         UC_History(["查看/搜索/删除本机记录"])
         UC_Memory(["查看/删除跨会话记忆"])
         UC_Text(["多模型文字对话"])
+        UC_Home(["提交低风险家居指令"])
         UC_Audit(["查询会话与运营数据"])
         UC_Account(["管理用户、角色与权限"])
     end
@@ -180,11 +214,13 @@ flowchart LR
     Consumer --> UC_History
     Consumer --> UC_Memory
     Consumer --> UC_Text
+    Consumer --> UC_Home
     Launcher --> UC_Wake
     UC_Wake -. "包含" .-> UC_Login
     UC_Wake -. "包含" .-> UC_Voice
     UC_Voice --> Bailian
     UC_Text --> Bailian
+    UC_Home --> GenieProvider
     Admin --> UC_Audit
     Admin --> UC_Account
 ~~~
@@ -207,6 +243,8 @@ flowchart LR
     MySQL[("MySQL 8\n业务与 AI 元数据")]
     Redis[("Redis\nToken 与认证缓存")]
     DashScope["阿里云百炼\nQwen / DeepSeek"]
+    GenieProvider["T10S 天猫精灵 ContentProvider\nGenieApi / method=15"]
+    HomeDevices["已绑定的灯、空调等设备"]
 
     User --> Client
     Tmall -->|"包名或 smartbutler://voice"| Client
@@ -219,6 +257,9 @@ flowchart LR
     Java --> Redis
     AI --> MySQL
     AI <-->|"百炼 WSS / HTTPS"| DashScope
+    AI -->|"结构化低风险指令事件"| Client
+    Client -->|"Android JSBridge + ContentResolver"| GenieProvider
+    GenieProvider --> HomeDevices
 ~~~
 
 ### 5.2 分层组件图
@@ -242,12 +283,15 @@ flowchart TB
         TextChat["文字模型代理"]
         Memory["长期记忆提取与注入"]
         History["会话异步持久化"]
+        CommandRouter["低风险家居指令路由"]
     end
 
     subgraph Infrastructure["基础设施层"]
         DB[("MySQL")]
         Cache[("Redis")]
         Models["阿里云百炼模型服务"]
+        NativeBridge["Android GenieBridge"]
+        Genie["T10S GenieApi Provider"]
     end
 
     App --> JavaAPI
@@ -259,6 +303,7 @@ flowchart TB
     FastAPI --> TextChat
     FastAPI --> Memory
     FastAPI --> History
+    FastAPI --> CommandRouter
     Auth --> DB
     Auth --> Cache
     AssistantOps --> DB
@@ -267,6 +312,9 @@ flowchart TB
     Memory --> Models
     Memory --> DB
     History --> DB
+    CommandRouter --> App
+    App --> NativeBridge
+    NativeBridge --> Genie
 ~~~
 
 ### 5.3 部署图
@@ -278,9 +326,13 @@ flowchart LR
         Speaker["扬声器"]
         App["uni-app H5/Android"]
         Local["本机记录\n按账号隔离"]
+        Bridge["GenieBridge\n原生双重校验"]
+        Provider["天猫精灵 GenieApi\nContentProvider"]
         Mic --> App
         App --> Speaker
         App --> Local
+        App --> Bridge
+        Bridge --> Provider
     end
 
     subgraph Edge["生产入口"]
@@ -300,6 +352,7 @@ flowchart LR
     end
 
     Cloud["阿里云百炼"]
+    Appliances["灯 / 空调 / 窗帘等\n天猫精灵已绑定设备"]
 
     App <-->|"HTTPS/WSS"| Proxy
     Proxy --> Java1
@@ -310,6 +363,7 @@ flowchart LR
     Java1 --> Redis
     AI --> MySQL
     AI <--> Cloud
+    Provider --> Appliances
 ~~~
 
 生产部署时，单条 WebSocket 在建立后固定由一个 FastAPI Worker 处理。总连接容量约等于 Worker 数乘以 <code>MAX_CONNECTIONS</code>，但最终容量仍受百炼账号并发配额、CPU、带宽、MySQL 连接池和反向代理限制。
@@ -327,6 +381,9 @@ flowchart LR
     Audio --> Player["客户端实时播放"]
     Transcript --> UI["会话 UI 与本机记录"]
     Transcript --> Queue["异步持久化/记忆队列"]
+    Transcript --> Detector["低风险家居意图检测"]
+    Detector -->|"结构化 WebSocket 事件"| Bridge["Android GenieBridge"]
+    Bridge --> Provider["T10S ContentProvider"]
     Queue --> DB[("MySQL")]
     Queue --> Extractor["长期记忆提取"]
     Extractor --> DB
@@ -390,7 +447,36 @@ sequenceDiagram
     AI->>DB: 合并 ai_user_memory
 ~~~
 
-### 6.3 跨会话长期记忆
+### 6.3 T10S 本机家居指令
+
+~~~mermaid
+sequenceDiagram
+    actor U as 消费者
+    participant APP as uni-app 音频桥
+    participant AI as FastAPI
+    participant QWEN as Qwen3.5 Omni
+    participant BRIDGE as Android GenieBridge
+    participant GENIE as T10S GenieApi Provider
+    participant DEVICE as 已绑定家居设备
+
+    APP->>AI: client.hello(capabilities.genie_provider=true)
+    U->>APP: “把客厅灯打开”
+    APP->>AI: PCM 音频
+    AI->>QWEN: 实时音频转发
+    QWEN-->>AI: 最终用户转写
+    AI->>AI: 低风险设备/动作校验与标准化
+    AI-->>APP: assistant.home_command.pending(command)
+    APP->>BRIDGE: sendToGenie(command)
+    BRIDGE->>BRIDGE: 长度、设备、动作和高风险词二次校验
+    BRIDGE->>GENIE: ContentResolver.insert(data, method=15)
+    GENIE-->>BRIDGE: 接受调用（允许返回 null Uri）
+    BRIDGE-->>APP: accepted=true（仅代表已提交）
+    GENIE->>DEVICE: 天猫精灵解析并尝试执行
+~~~
+
+浏览器 H5 的 `genie_provider` 能力为 `false`，不会收到本机控制事件。运行时链路不执行 `adb shell`；ADB 的等价命令仅用于开发人员检查目标系统 Provider 是否存在和可调用。
+
+### 6.4 跨会话长期记忆
 
 ~~~mermaid
 sequenceDiagram
@@ -662,7 +748,8 @@ erDiagram
 
 | 层级 | 技术 | 当前版本/说明 |
 | --- | --- | --- |
-| 消费者端 | uni-app、Vue 3、Android Studio WebView 容器 | H5 与 Android 正式 APK |
+| 消费者端 | uni-app、Vue 3、Android Studio WebView 容器 | H5 与 Android 正式 APK；原生 `addJavascriptInterface` 桥 |
+| T10S 本机控制 | Android `ContentResolver`、天猫精灵导出 Provider | `GenieApi`，文字识别方法 `15`；仅低风险白名单 |
 | 浏览器音频 | Web Audio API、WebSocket | PCM 16-bit 单声道；输入 16kHz，输出 24kHz |
 | 运营后台 | Vue 3、Vite、Element Plus、Pinia、Axios、ECharts | Vue 3.5.26、Vite 6.4.3、Element Plus 2.13.1 |
 | Java 服务 | Java、Spring Boot、Spring Security、MyBatis、Druid | Java 17、Spring Boot 4.0.6、MyBatis Starter 4.0.1 |
@@ -711,7 +798,8 @@ RuoYi/
 │  ├─ pages/text-chat.vue            # 文字对话
 │  ├─ pages/login.vue
 │  ├─ pages/register.vue
-│  └─ pages/common/agreement/        # 本地协议与政策
+│  ├─ pages/common/agreement/        # 本地协议与政策
+│  └─ android-native/                # 原生 WebView、GenieBridge 与 ContentProvider 适配
 ├─ ruoyi-ui/                         # Vue 3 运营后台
 └─ sql/
    ├─ ry-cat.sql
@@ -830,16 +918,18 @@ npm run dev
 5. 消费者端 H5（9090）
 6. 运营后台（9091）
 
-### 13.8 Android v1.0.0 正式包
+### 13.8 Android v1.1.0 正式包
 
 - 原生工程：`ruoyi-app/android-native`
 - 应用包名：`com.jpx.tmallsmarthome`
 - 最低系统：Android 6.0（API 23）
 - 已验收设备：天猫精灵智慧屏 T10S，Android 10、1280×800 横屏、arm64-v8a
-- 正式安装包：`ruoyi-app/apk/天猫智家语音助手-v1.0.0.apk`
+- 正式安装包：`ruoyi-app/apk/天猫智家语音助手-v1.1.0.apk`
 - 拉起方式：Launcher Activity 或 `smartbutler://voice`
 
-签名密钥位于本机忽略目录，不进入 Git、Docker 构建上下文或云服务器。重新构建时使用 Android Studio 自带 JBR、`D:\Android-SDK` 和 `ruoyi-app/android-native/gradlew.bat assembleRelease`。
+签名密钥位于本机忽略目录，不进入 Git、Docker 构建上下文或云服务器。重新构建时使用 Android Studio 自带 JBR 和 `D:\Android-SDK`。当前仓库未提交 Gradle Wrapper，需从 Android Studio 执行 Gradle 任务，或使用本机兼容的 Gradle 9.6.1 运行 `clean assembleRelease`；后续建议补交 Wrapper 以固定构建版本。
+
+Android 原生容器在可信的 `file:///android_asset/` 页面注册 `GenieBridge`。桥接调用链是 `sendToGenie()` → `ContentResolver.insert()`，并在原生层再次校验低风险设备和操作。不要把开发调试用的 `adb shell content insert` 拼进 App，也不要申请 root 或 Shell 权限。
 
 ---
 
@@ -851,7 +941,7 @@ npm run dev
 
 - <code>baseUrl</code>：Java API 地址。
 - <code>assistant.baseUrl</code>：FastAPI AI 网关地址。
-- <code>appInfo.version</code>：当前产品版本，v1.0.0。
+- <code>appInfo.version</code>：当前产品版本，v1.1.0。
 
 这些值在消费者界面中不提供编辑入口。
 
@@ -865,7 +955,8 @@ npm run dev
 | DASHSCOPE_REALTIME_URL | 实时语音 WSS | 按百炼地域/Workspace 配置 |
 | DASHSCOPE_MODEL | 实时语音模型 | qwen3.5-omni-plus-realtime |
 | DASHSCOPE_VOICE | 音色 | Ethan |
-| ACOUSTIC_RELAY_ENABLED | 是否启用外部天猫精灵声学转发实验 | true；正式接入 Home Assistant 后建议关闭 |
+| GENIE_PROVIDER_ENABLED | 是否允许向声明本机能力的 Android 客户端下发家居指令事件 | true；非 T10S 客户端仍按能力协商关闭 |
+| ACOUSTIC_RELAY_ENABLED | 是否启用外部天猫精灵声学转发回退 | false；仅在 Provider 不可用且明确需要声学方案时开启 |
 | ACOUSTIC_RELAY_WAKE_PHRASE | 转发给外部设备的唤醒词 | 天猫精灵 |
 | HOST / PORT | 监听地址和端口 | 0.0.0.0 / 8001 |
 | ALLOWED_ORIGINS | 浏览器 CORS 白名单 | 生产环境填写明确域名；Android WebView 的空/`file://` Origin 由原生客户端规则处理 |
@@ -919,6 +1010,9 @@ smartbutler://voice
 - 长期记忆按服务端 <code>user_id</code> 隔离，接口不能信任客户端自行提交的用户编号。
 - 密码由 RuoYi 的安全机制处理，禁止在日志中打印密码、Token 或 API Key。
 - 用户协议和隐私政策保存在消费者端本地页面，发布前应由公司法务复核主体名称、联系方式、数据保留期限、第三方模型服务说明和注销流程。
+- 家居指令只向本机天猫精灵 Provider 提交必要的短文本；运行时不使用 ADB、终端、root 或无障碍服务。
+- Provider 能力由 Android 客户端握手声明；服务端检测和原生桥白名单构成两层校验，高风险指令不下发也不提交。
+- 当前接口没有设备状态回执，`accepted=true` 只代表本机调用已提交，不能作为设备执行成功凭据。
 - AI 回答可能不准确，客户端保留必要的生成内容提示。
 
 ---
@@ -957,6 +1051,9 @@ npm run build:prod
 - [ ] 用户协议、隐私政策可离线打开且无 RuoYi 外链。
 - [ ] 服务端日志不出现 API Key、密码或完整 Token。
 - [ ] H5 在目标工控屏分辨率下无溢出、错位和异常图标。
+- [ ] T10S 主应用握手声明 `genie_provider=true`，明确的灯/空调低风险指令能提交给 GenieApi。
+- [ ] H5 与普通 Android 设备不声明 Provider 能力，不收到本机控制事件。
+- [ ] 含糊指令以及门锁、燃气、安防等高风险指令被拒绝，界面不谎报设备已完成操作。
 
 ---
 
@@ -973,8 +1070,8 @@ npm run build:prod
 
 - 对比 Dify、LangChain、LangGraph 后确定 Agent 编排方案。
 - 设计工具调用权限、确认机制、审计和幂等控制。
-- 接入 Home Assistant 服务层。
-- 增加设备状态查询和受控的家具操作。
+- 在现有 T10S 低风险文字指令通道之外接入 Home Assistant 服务层。
+- 增加设备状态查询、执行结果闭环、权限确认和复杂自动化场景。
 
 ### 长期方向
 
@@ -994,7 +1091,7 @@ npm run build:prod
 5. 修改数据库结构时同时更新全量 SQL、升级 SQL 和本 README 的 ER 图。
 6. 修改接口时同步更新接口表和消费者端调用。
 7. 修改产品版本时同步更新本 README、<code>ruoyi-app/config.js</code> 和发布说明。
-8. 不在实时音频代理中直接实现家具协议；后续通过 Agent/工具适配层接入。
+8. 实时音频代理只负责识别并下发结构化低风险意图；Android Provider、Home Assistant 或其他设备协议必须留在独立适配层。
 9. 提交前至少运行与改动相关的 Java、Python 或前端构建测试。
 10. 不提交 node_modules、dist、日志、.env、IDE 配置或真实用户数据。
 
@@ -1046,9 +1143,9 @@ npm run build:prod
 
 ---
 
-## 22. v1.0.1 后续优化与 v1.0.0 发布验收记录
+## 22. v1.1.0 发布验收与后续优化记录
 
-本节原始清单来自 v1.0.0 完成后的一次完整代码审查。v1.0.0 发布构建已完成生产地址、Android 麦克风权限、隐私弹窗、图标/启动页、原生 WebView Origin、签名、T10S 横屏适配和云端实时语音链路。清单中仍未关闭的安全加固与体验项继续作为 v1.0.1 工作，不影响已交付的内部测试 APK；正式公开发布前仍须完成生产域名/HTTPS、密钥轮换和法务复核。
+本节原始清单来自 v1.0.0 完成后的一次完整代码审查。v1.1.0 已在原有生产地址、Android 权限、隐私弹窗、图标/启动页、WebView Origin、签名、T10S 横屏和云端实时语音基础上，增加本机 ContentProvider 控制链路。未关闭的生产安全加固与体验项不影响内部测试 APK；正式公开发布前仍须完成生产域名/HTTPS、密钥轮换、法务复核和 v1.1.0 T10S 主链路验收。
 
 优先级说明：
 
@@ -1197,9 +1294,10 @@ npm run build:prod
 2. A 类与 B 类全部完成后，才能进入 HBuilderX 云打包流程。
 3. 涉及接口或配置变更的条目，必须同步更新第 12 节接口表与第 14 节配置表。
 4. 若某条目在实施中发现方案不成立，请在本节中记录结论与替代方案，不要静默跳过。
-5. 本清单全部关闭后，产品版本升至 v1.0.1，并更新第 1 节更新说明与第 17.2 节验收清单。
+5. 本清单中的已完成能力已纳入 v1.1.0；新增或遗留事项完成后，应按语义化版本规则继续升级并同步第 1 节与验收清单。
 
 ---
 
-**文档基线：天猫智家 v1.0.0 · 2026 年 8 月 11 日**
-**发布验收：v1.0.0 APK + T10S 实时语音 + 阿里云 Docker 部署 · 2026 年 8 月 11 日**
+**当前文档基线：天猫智家 v1.1.0 · 2026 年 8 月 13 日 11:07:12（UTC+8）**
+
+**当前构建状态：v1.1.0 签名 APK、FastAPI、H5 与 Docker 配置已验证；T10S ContentProvider 主应用端到端验收待补。**

@@ -14,6 +14,7 @@
         muted: false,
         captureSuppressed: false,
         acousticRelayPending: false,
+        homeCommandPending: false,
         relaySafetyTimer: null,
         manualStop: false,
         nextPlayAt: 0,
@@ -73,7 +74,10 @@
             socket.send(JSON.stringify({
               type: 'client.hello',
               token: options.token || '',
-              client_id: options.clientId || 'mobile'
+              client_id: options.clientId || 'mobile',
+              capabilities: {
+                genie_provider: this.hasGenieProvider()
+              }
             }))
             this.startKeepalive(socket)
           }
@@ -159,6 +163,10 @@
           this.beginAcousticRelay(event)
           return
         }
+        if (type === 'assistant.home_command.pending') {
+          this.executeHomeCommand(event)
+          return
+        }
         if (type === 'input_audio_buffer.speech_started') {
           // 声学转发期间，本机扬声器和附近天猫精灵的回应都不能回灌给 Omni。
           if (this.captureSuppressed) return
@@ -209,7 +217,9 @@
         }
         if (type === 'response.done') {
           this.responding = false
-          this.schedulePlaybackDone(this.acousticRelayPending ? 4500 : 0)
+          this.schedulePlaybackDone(
+            this.homeCommandPending ? 8000 : (this.acousticRelayPending ? 4500 : 0)
+          )
           return
         }
         if (type === 'assistant.session.rotating') {
@@ -372,6 +382,61 @@
           this.socket.send(JSON.stringify({ type: 'input_audio_buffer.clear' }))
         }
       },
+      hasGenieProvider() {
+        try {
+          return Boolean(
+            window.GenieBridge &&
+            typeof window.GenieBridge.sendToGenie === 'function' &&
+            (typeof window.GenieBridge.isAvailable !== 'function' || window.GenieBridge.isAvailable())
+          )
+        } catch (error) {
+          return false
+        }
+      },
+      executeHomeCommand(event) {
+        const command = String((event && event.command) || '').trim()
+        if (!command || !this.hasGenieProvider()) {
+          this.emit({
+            type: 'home.command.failed',
+            message: '当前设备未提供天猫精灵本机控制通道'
+          })
+          return
+        }
+        this.homeCommandPending = true
+        this.captureSuppressed = true
+        if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+          try { this.socket.send(JSON.stringify({ type: 'input_audio_buffer.clear' })) } catch (error) {}
+        }
+        if (this.relaySafetyTimer) clearTimeout(this.relaySafetyTimer)
+        this.relaySafetyTimer = setTimeout(() => {
+          this.resetAcousticRelay()
+          this.emit({ type: 'playback.done' })
+        }, 20000)
+        this.emit({
+          type: 'home.command.started',
+          command,
+          message: (event && event.message) || '正在通过天猫精灵执行家居指令'
+        })
+        try {
+          const rawResult = window.GenieBridge.sendToGenie(command)
+          const result = typeof rawResult === 'string' ? JSON.parse(rawResult) : rawResult
+          if (!result || result.accepted !== true) {
+            throw new Error((result && result.message) || '天猫精灵未接受该指令')
+          }
+          this.emit({
+            type: 'home.command.accepted',
+            command,
+            message: result.message || '指令已提交给天猫精灵'
+          })
+        } catch (error) {
+          this.resetAcousticRelay()
+          this.emit({
+            type: 'home.command.failed',
+            command,
+            message: `家居指令提交失败：${error.message || error}`
+          })
+        }
+      },
       beginAcousticRelay(event) {
         this.acousticRelayPending = true
         this.captureSuppressed = true
@@ -392,6 +457,7 @@
         if (this.relaySafetyTimer) clearTimeout(this.relaySafetyTimer)
         this.relaySafetyTimer = null
         this.acousticRelayPending = false
+        this.homeCommandPending = false
         this.captureSuppressed = false
       },
       downsampleToPcm16(input, inputRate, outputRate) {

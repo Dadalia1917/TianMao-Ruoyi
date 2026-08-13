@@ -51,7 +51,7 @@ services:
     build:
       context: .
       dockerfile: deploy/docker/java.Dockerfile
-    image: tmall-smart-home/java-api:1.0.0
+    image: tmall-smart-home/java-api:1.1.0
     restart: unless-stopped
     environment:
       TZ: Asia/Shanghai
@@ -96,7 +96,7 @@ services:
     build:
       context: .
       dockerfile: deploy/docker/fastapi.Dockerfile
-    image: tmall-smart-home/ai-gateway:1.0.0
+    image: tmall-smart-home/ai-gateway:1.1.0
     restart: unless-stopped
     environment:
       TZ: Asia/Shanghai
@@ -104,6 +104,9 @@ services:
       DASHSCOPE_REALTIME_URL: ${DASHSCOPE_REALTIME_URL:-wss://dashscope.aliyuncs.com/api-ws/v1/realtime}
       DASHSCOPE_MODEL: ${DASHSCOPE_MODEL:-qwen3.5-omni-plus-realtime}
       DASHSCOPE_VOICE: ${DASHSCOPE_VOICE:-Ethan}
+      GENIE_PROVIDER_ENABLED: ${GENIE_PROVIDER_ENABLED:-true}
+      ACOUSTIC_RELAY_ENABLED: ${ACOUSTIC_RELAY_ENABLED:-false}
+      ACOUSTIC_RELAY_WAKE_PHRASE: ${ACOUSTIC_RELAY_WAKE_PHRASE:-天猫精灵}
       HOST: 0.0.0.0
       PORT: "8001"
       LOG_LEVEL: ${FASTAPI_LOG_LEVEL:-info}
@@ -171,7 +174,7 @@ services:
     build:
       context: .
       dockerfile: deploy/docker/gateway.Dockerfile
-    image: tmall-smart-home/web-gateway:1.0.0
+    image: tmall-smart-home/web-gateway:1.1.0
     restart: unless-stopped
     environment:
       PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:-http://:80}

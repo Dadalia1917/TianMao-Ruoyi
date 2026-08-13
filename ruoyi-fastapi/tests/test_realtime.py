@@ -8,6 +8,7 @@ from assistant_server.realtime import (
     ConnectionLimiter,
     build_session_update,
     classify_upstream_connection_error,
+    extract_home_control_command,
     should_start_acoustic_relay,
 )
 
@@ -34,15 +35,30 @@ def test_wake_phrase_has_a_short_fixed_acknowledgement():
     assert "不是你的模型身份" in instructions
 
 
-def test_low_risk_home_command_uses_acoustic_relay_prompt():
+def test_low_risk_home_command_uses_local_genie_provider_prompt():
     settings = Settings.from_env()
-    instructions = build_session_update(settings)["session"]["instructions"]
+    instructions = build_session_update(
+        settings, genie_provider_available=True
+    )["session"]["instructions"]
 
-    assert "外部天猫精灵声学转发" in instructions
-    assert "天猫精灵，打开卧室灯" in instructions
+    assert "本机智能家居指令通道" in instructions
+    assert "执行了 ADB" in instructions
     assert should_start_acoustic_relay("天猫管家，帮我打开卧室的灯")
     assert should_start_acoustic_relay("把厨房灯关了")
     assert should_start_acoustic_relay("把客厅空调调到二十六度")
+    assert extract_home_control_command("天猫管家，帮我打开卧室的灯") == "打开卧室的灯"
+    assert extract_home_control_command("请把厨房灯关了") == "把厨房灯关了"
+
+
+def test_browser_without_native_bridge_does_not_claim_local_control(monkeypatch):
+    monkeypatch.setenv("GENIE_PROVIDER_ENABLED", "true")
+    monkeypatch.setenv("ACOUSTIC_RELAY_ENABLED", "false")
+    instructions = build_session_update(
+        Settings.from_env(), genie_provider_available=False
+    )["session"]["instructions"]
+
+    assert "没有可用的本机智能家居控制通道" in instructions
+    assert "本机智能家居指令通道" not in instructions
 
 
 @pytest.mark.parametrize(
@@ -57,10 +73,13 @@ def test_low_risk_home_command_uses_acoustic_relay_prompt():
         "门锁打开",
         "关闭燃气",
         "我刚才说了打开空调",
+        "帮我看看空调开了吗",
+        "确认一下客厅灯的设备状态",
     ),
 )
 def test_acoustic_relay_rejects_non_command_or_sensitive_request(transcript):
     assert not should_start_acoustic_relay(transcript)
+    assert extract_home_control_command(transcript) == ""
 
 
 def test_account_memory_is_delimited_as_untrusted_context():

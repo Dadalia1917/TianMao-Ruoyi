@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- v1.0.0 使用公网 IP 联调；绑定正式域名后应改为仅允许 HTTPS/WSS。 -->
+    <!-- v1.1.0 使用公网 IP 联调；绑定正式域名后应改为仅允许 HTTPS/WSS。 -->
     <base-config cleartextTrafficPermitted="true" />
 </network-security-config>

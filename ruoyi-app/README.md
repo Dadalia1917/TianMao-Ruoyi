@@ -1,8 +1,15 @@
 # 天猫智家·千问智能语音助手客户端 / Tmall Smart Home Qwen Voice Client
 
-**产品版本：v1.0.0 · 文档日期：2026 年 8 月 11 日**
+**产品版本：v1.1.0 · 发布时间：2026 年 8 月 13 日 11:07:12（UTC+8）**
 
-这是仓库的 uni-app 客户端，支持 H5 与后续 Android APK。完整架构和启动步骤请阅读仓库根目录 `README.md`。
+## v1.1.0 更新说明
+
+- 增加 Qwen3.5 Omni 智能家居指令识别及结构化事件处理。
+- Android 客户端增加天猫精灵 ContentProvider 原生调用链路，不依赖运行时 ADB、root 或终端命令。
+- 加入前后端双重设备/动作白名单与高风险指令拦截，并保持普通语音、文字对话及长期记忆功能不变。
+- 统一客户端、FastAPI、Android、Docker 镜像标签和安装包版本为 v1.1.0；Android `versionCode` 为 `110`。
+
+这是仓库的 uni-app 客户端，支持 H5 与 Android APK。完整架构和启动步骤请阅读仓库根目录 `README.md`。
 
 This directory contains the uni-app H5/Android client. See the repository root `README.md` for the complete architecture and setup guide.
 
