@@ -21,6 +21,7 @@ def test_session_is_pure_realtime_voice(monkeypatch):
     assert session["input_audio_format"] == "pcm16"
     assert session["output_audio_format"] == "pcm16"
     assert session["turn_detection"]["type"] == "semantic_vad"
+    assert session["turn_detection"]["threshold"] == 0.35
     assert "tools" not in session
 
 
@@ -48,6 +49,31 @@ def test_low_risk_home_command_uses_local_genie_provider_prompt():
     assert should_start_acoustic_relay("把客厅空调调到二十六度")
     assert extract_home_control_command("天猫管家，帮我打开卧室的灯") == "打开卧室的灯"
     assert extract_home_control_command("请把厨房灯关了") == "把厨房灯关了"
+    assert extract_home_control_command("让天猫精灵开灯") == "开灯"
+    assert extract_home_control_command("请天猫精灵打开卧室灯") == "打开卧室灯"
+    assert (
+        extract_home_control_command("帮我打开天猫精灵，让天猫精灵开灯")
+        == "开灯"
+    )
+
+
+@pytest.mark.parametrize(
+    ("transcript", "expected"),
+    (
+        ("把客厅灯调亮一点", "把客厅灯调亮一点"),
+        ("空调温度调到二十六度", "空调温度调到二十六度"),
+        ("新风切换到自动模式", "新风切换到自动模式"),
+        ("把客厅窗帘拉开", "把客厅窗帘拉开"),
+        ("电视音量调低一点", "电视音量调低一点"),
+        ("投影仪切换到 HDMI 一", "投影仪切换到HDMI一"),
+        ("启动卧室加湿器", "启动卧室加湿器"),
+        ("让扫地机器人开始清扫", "让扫地机器人开始清扫"),
+        ("普通插座关闭", "普通插座关闭"),
+    ),
+)
+def test_common_low_risk_home_devices_share_provider_channel(transcript, expected):
+    assert should_start_acoustic_relay(transcript)
+    assert extract_home_control_command(transcript) == expected
 
 
 def test_browser_without_native_bridge_does_not_claim_local_control(monkeypatch):
@@ -72,6 +98,8 @@ def test_browser_without_native_bridge_does_not_claim_local_control(monkeypatch)
         "帮我开关卧室灯",
         "门锁打开",
         "关闭燃气",
+        "打开厨房电磁炉",
+        "关闭客厅摄像头",
         "我刚才说了打开空调",
         "帮我看看空调开了吗",
         "确认一下客厅灯的设备状态",

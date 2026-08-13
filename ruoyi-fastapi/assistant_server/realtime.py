@@ -34,10 +34,11 @@ ASSISTANT_INSTRUCTIONS = """请使用自然、简洁、温暖的中文回答，�
 GENIE_PROVIDER_INSTRUCTIONS = """
 
 当前客户端已接入天猫精灵智慧屏的本机智能家居指令通道。服务端会独立识别低风险的明确控制请求，并由 App 在本机提交给天猫精灵执行：
-1. 对打开、关闭或调节灯、空调、窗帘、电视、风扇、空气净化器或普通插座的明确请求，只需简短回答“好的，正在为您处理”。
+1. 对明确的低风险家居控制请求（灯光、空调/新风、窗帘、电视/投影、风扇、空气净化、加湿除湿、扫地机器人和智能插座），只需简短回答“好的，正在为您处理”。温度、亮度、风速、模式、窗帘开合和电视音量等调节也属于可执行指令。
 2. 不要重复唤醒词，不要朗读完整设备命令，不要说自己进入了终端、执行了 ADB 或调用了内部接口。
 3. 指令只是已提交，不代表设备一定成功执行；不得声称“已经打开”“已经完成”。
 4. 对含糊操作先询问最终状态；门锁、燃气、热水器、车库门、监控撤防和报警器等敏感操作不支持，应明确说明不能执行。
+5. 本段明确说明通道可用；不得回答“无法控制”“请手动操作”或建议用户再去呼喊天猫精灵。
 """
 
 
@@ -73,17 +74,49 @@ _RELAY_ACTION_MARKERS = (
     "降低",
     "调高",
     "调低",
+    "调亮",
+    "调暗",
+    "调大",
+    "调小",
+    "提高",
+    "减小",
+    "启动",
+    "停止",
+    "暂停",
+    "继续",
+    "切换到",
+    "换到",
+    "拉开",
+    "拉上",
+    "合上",
+    "亮一点",
+    "暗一点",
+    "开始清扫",
+    "开始扫地",
+    "清扫",
+    "回充",
     "开",
     "关",
 )
 _RELAY_DEVICE_MARKERS = (
     "灯",
+    "照明",
     "空调",
+    "新风",
     "窗帘",
+    "纱帘",
+    "百叶帘",
     "电视",
+    "投影仪",
+    "投影机",
     "风扇",
     "空气净化器",
     "净化器",
+    "加湿器",
+    "除湿机",
+    "扫地机器人",
+    "扫地机",
+    "智能插座",
     "普通插座",
 )
 _RELAY_NEGATION_MARKERS = ("不要", "别", "不用", "取消", "不需要")
@@ -128,6 +161,15 @@ _RELAY_UNSAFE_MARKERS = (
     "监控",
     "撤防",
     "报警器",
+    "摄像头",
+    "摄像机",
+    "电磁炉",
+    "燃气灶",
+    "烤箱",
+    "微波炉",
+    "电饭煲",
+    "取暖器",
+    "电热毯",
 )
 
 
@@ -164,9 +206,21 @@ def extract_home_control_command(transcript: str) -> str:
     if not should_start_acoustic_relay(raw):
         return ""
     command = "".join(raw.split())
+    # 用户常说“打开天猫精灵，让天猫精灵开灯”。前半句是调用方式，
+    # 不是应交给 Genie 的设备命令；选择最后一段真正含设备和动作的短句。
+    candidates = [
+        part
+        for part in re.split(r"[，,。.!！?？;；：:、]+", command)
+        if any(marker in part for marker in _RELAY_ACTION_MARKERS)
+        and any(marker in part for marker in _RELAY_DEVICE_MARKERS)
+    ]
+    if candidates:
+        command = candidates[-1]
     command = re.sub(r"^(?:天猫管家|天猫智家|智能管家|曼巴管家)[，,：:、]?", "", command)
     command = re.sub(r"^(?:请|麻烦|劳驾)", "", command)
     command = re.sub(r"^(?:帮我|给我|替我)", "", command)
+    command = re.sub(r"^(?:让|叫|请)?天猫精灵(?:帮我|给我|替我)?", "", command)
+    command = re.sub(r"^(?:请|麻烦|劳驾|帮我|给我|替我)", "", command)
     command = command.strip("，,。.!！?？;；：:、 ")
     if not command or len(command) > 120:
         return ""
@@ -213,7 +267,8 @@ def build_session_update(
             "instructions": instructions,
             "turn_detection": {
                 "type": "semantic_vad",
-                "threshold": 0.1,
+                # 0.1 在智慧屏的远场麦克风上会把扬声器尾音与环境声频繁判成新一轮。
+                "threshold": 0.35,
                 "prefix_padding_ms": 400,
                 "silence_duration_ms": 700,
             },

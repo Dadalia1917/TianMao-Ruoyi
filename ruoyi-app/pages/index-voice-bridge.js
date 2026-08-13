@@ -13,6 +13,7 @@
         mediaSource: null,
         muted: false,
         captureSuppressed: false,
+        assistantPlaybackPending: false,
         acousticRelayPending: false,
         homeCommandPending: false,
         relaySafetyTimer: null,
@@ -89,6 +90,8 @@
             this.stopKeepalive()
             this.stopCapture()
             this.clearPlayback()
+            // 连接若在播报期间中断，不能把半双工抑制状态带到重连会话。
+            this.resetAcousticRelay()
             if (this.manualStop) {
               this.emit({ type: 'closed' })
             } else {
@@ -208,6 +211,10 @@
           return
         }
         if (type === 'response.audio.delta') {
+          // T10S 的系统 WebView/音频 HAL 无法稳定消除本机扬声器回声。
+          // 第一帧播出前先停止上行并清空 VAD 缓冲，避免助手把自己的回答
+          // 再识别成用户问题，形成“自问自答”循环。
+          this.beginAssistantPlaybackSuppression()
           if (!this.speakingSent) {
             this.speakingSent = true
             this.emit({ type: 'assistant.speaking' })
@@ -218,7 +225,9 @@
         if (type === 'response.done') {
           this.responding = false
           this.schedulePlaybackDone(
-            this.homeCommandPending ? 8000 : (this.acousticRelayPending ? 4500 : 0)
+            this.homeCommandPending
+              ? 8000
+              : (this.acousticRelayPending ? 4500 : (this.assistantPlaybackPending ? 1200 : 0))
           )
           return
         }
@@ -384,10 +393,12 @@
       },
       hasGenieProvider() {
         try {
+          // 是否能 resolve 到 provider 元数据并不等同于 ContentResolver.insert()
+          // 是否可调用。T10S 的系统 provider 可被普通 UID 调用，但包可见性查询
+          // 可能返回空；这里仅协商原生桥能力，真实结果由 sendToGenie 返回。
           return Boolean(
             window.GenieBridge &&
-            typeof window.GenieBridge.sendToGenie === 'function' &&
-            (typeof window.GenieBridge.isAvailable !== 'function' || window.GenieBridge.isAvailable())
+            typeof window.GenieBridge.sendToGenie === 'function'
           )
         } catch (error) {
           return false
@@ -453,9 +464,18 @@
           message: event.message || '正在把指令转达给附近的天猫精灵'
         })
       },
+      beginAssistantPlaybackSuppression() {
+        if (this.assistantPlaybackPending) return
+        this.assistantPlaybackPending = true
+        this.captureSuppressed = true
+        if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+          try { this.socket.send(JSON.stringify({ type: 'input_audio_buffer.clear' })) } catch (error) {}
+        }
+      },
       resetAcousticRelay() {
         if (this.relaySafetyTimer) clearTimeout(this.relaySafetyTimer)
         this.relaySafetyTimer = null
+        this.assistantPlaybackPending = false
         this.acousticRelayPending = false
         this.homeCommandPending = false
         this.captureSuppressed = false

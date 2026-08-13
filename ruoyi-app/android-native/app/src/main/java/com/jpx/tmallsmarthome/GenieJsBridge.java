@@ -16,6 +16,8 @@ public final class GenieJsBridge {
 
     @JavascriptInterface
     public boolean isAvailable() {
+        // 能力协商只表示原生桥已安装。provider 的最终可用性由真实 insert
+        // 决定，不能用 resolveContentProvider() 的可见性结果提前否决。
         return GenieCommand.isAvailable(appContext);
     }
 
