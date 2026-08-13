@@ -1,8 +1,20 @@
 # 天猫智家 Android 原生容器
 
-**产品版本：v1.1.0 · 文档更新时间：2026 年 8 月 13 日 13:07:54（UTC+8）**
+**产品版本：v1.1.0 · 文档更新时间：2026 年 8 月 13 日 17:51:40（UTC+8）**
 
-该工程把 `ruoyi-app` 的 H5 产物装入 Android WebView，并为天猫精灵智慧屏 T10S 提供麦克风、开机拉起和本机智能家居指令桥接。
+该工程把 `ruoyi-app` 的 H5 产物装入 Android WebView，并为天猫精灵智慧屏 T10S 提供麦克风、开机悬浮入口和本机智能家居指令桥接。
+
+## T10S 开机悬浮入口
+
+T10S 固件会静默忽略第三方应用在开机广播中直接发出的前台服务启动请求。因此当前链路为：
+
+1. `OverlayBootReceiver` 接收 `BOOT_COMPLETED`、快速启动或应用覆盖安装广播。
+2. Receiver 启动 1×1、透明、不进入最近任务的 `OverlayBootstrapActivity`。
+3. Bootstrap Activity 在正常 Activity 上下文中启动 `KeepAliveService`，约 300ms 内自动退出并返回天猫精灵原界面。
+4. `KeepAliveService` 以前台服务形式持有右上角“智”悬浮球；只有用户点击悬浮球才打开 `MainActivity`。
+5. APP 进入前台时隐藏悬浮球，按 Home、切换应用或进入后台时通过 `onPause/onUserLeaveHint` 恢复悬浮球。
+
+2026 年 8 月 13 日已完成真实重启验证：引导 Activity 启动服务后返回 `com.alibaba.genie.panel`，完整助手 UI 未自动打开；悬浮球持续可见，点击后可恢复 APP。正式 APK 与设备安装包 SHA-256 均为 `6431E0BDB0A51185C8D026AE46A6E94CAA73800F2B6252F79D562ECD67B70BE0`。
 
 ## T10S 家居指令链路
 

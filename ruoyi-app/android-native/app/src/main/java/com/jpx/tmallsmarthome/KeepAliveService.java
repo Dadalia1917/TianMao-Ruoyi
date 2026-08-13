@@ -7,8 +7,10 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.content.ComponentName;
 import android.os.Build;
 import android.os.IBinder;
+import android.os.Looper;
 import android.util.Log;
 
 /** Foreground service owning the overlay entry while the assistant UI is in background. */
@@ -23,17 +25,36 @@ public final class KeepAliveService extends Service {
     private static final String TAG = "TmallSmartHomeKeep";
     private static final String CHANNEL_ID = "tmall_smarthome_switch";
     private static final int NOTIFICATION_ID = 1001;
+    private static volatile KeepAliveService runningInstance;
 
     private FloatingBubble bubble;
     private boolean appInForeground;
 
     public static void request(Context context, String action) {
-        Intent intent = new Intent(context, KeepAliveService.class).setAction(action);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.startForegroundService(intent);
-        } else {
-            context.startService(intent);
+        KeepAliveService instance = runningInstance;
+        if (instance != null) {
+            Log.i(TAG, "direct action=" + action);
+            if (Looper.myLooper() == Looper.getMainLooper()) {
+                instance.applyAction(action);
+            } else {
+                instance.getMainLooperHandler().post(() -> instance.applyAction(action));
+            }
+            return;
         }
+        Intent intent = new Intent(context, KeepAliveService.class).setAction(action);
+        ComponentName component;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            component = context.startForegroundService(intent);
+        } else {
+            component = context.startService(intent);
+        }
+        Log.i(TAG, "service request action=" + action + " component=" + component);
+    }
+
+    @Override
+    public void onCreate() {
+        super.onCreate();
+        runningInstance = this;
     }
 
     @Override
@@ -45,19 +66,32 @@ public final class KeepAliveService extends Service {
     public int onStartCommand(Intent intent, int flags, int startId) {
         startForeground(NOTIFICATION_ID, buildNotification());
         String action = intent == null ? ACTION_START : intent.getAction();
+        Log.i(TAG, "onStartCommand id=" + startId + " action=" + action);
+        applyAction(action);
+        if (ACTION_STOP.equals(action)) {
+            return START_NOT_STICKY;
+        }
+        return START_STICKY;
+    }
+
+    private void applyAction(String action) {
         if (ACTION_STOP.equals(action)) {
             hideBubble();
             stopForeground(true);
             stopSelf();
-            return START_NOT_STICKY;
+            return;
         }
         if (ACTION_APP_FOREGROUND.equals(action)) {
             appInForeground = true;
         } else if (ACTION_APP_BACKGROUND.equals(action) || ACTION_START.equals(action)) {
             appInForeground = false;
         }
+        Log.i(TAG, "applyAction action=" + action + " foreground=" + appInForeground);
         syncBubbleVisibility();
-        return START_STICKY;
+    }
+
+    private android.os.Handler getMainLooperHandler() {
+        return new android.os.Handler(getMainLooper());
     }
 
     private void syncBubbleVisibility() {
@@ -83,6 +117,9 @@ public final class KeepAliveService extends Service {
 
     @Override
     public void onDestroy() {
+        if (runningInstance == this) {
+            runningInstance = null;
+        }
         hideBubble();
         bubble = null;
         super.onDestroy();

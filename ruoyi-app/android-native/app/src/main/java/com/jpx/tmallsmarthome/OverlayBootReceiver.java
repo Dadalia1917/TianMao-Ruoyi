@@ -14,15 +14,21 @@ public final class OverlayBootReceiver extends BroadcastReceiver {
         String action = intent == null ? null : intent.getAction();
         if (!Intent.ACTION_BOOT_COMPLETED.equals(action)
                 && !Intent.ACTION_LOCKED_BOOT_COMPLETED.equals(action)
+                && !Intent.ACTION_MY_PACKAGE_REPLACED.equals(action)
                 && !"android.intent.action.QUICKBOOT_POWERON".equals(action)
                 && !"com.htc.intent.action.QUICKBOOT_POWERON".equals(action)) {
             return;
         }
         try {
-            KeepAliveService.request(context, KeepAliveService.ACTION_START);
-            Log.i(TAG, "overlay service started after boot; assistant UI remains closed");
+            Intent bootstrap = new Intent(context, OverlayBootstrapActivity.class)
+                    .setAction(OverlayBootstrapActivity.ACTION_BOOTSTRAP_OVERLAY)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                            | Intent.FLAG_ACTIVITY_NO_ANIMATION
+                            | Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS);
+            context.startActivity(bootstrap);
+            Log.i(TAG, "overlay bootstrap requested; assistant UI remains closed");
         } catch (RuntimeException error) {
-            Log.e(TAG, "failed to start overlay service after boot", error);
+            Log.e(TAG, "failed to start overlay bootstrap", error);
         }
     }
 }

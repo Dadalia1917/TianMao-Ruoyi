@@ -72,9 +72,30 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        Log.i(TAG, "onResume -> overlay foreground");
         enterImmersiveMode();
         KeepAliveService.request(this, KeepAliveService.ACTION_APP_FOREGROUND);
         resumeWebRuntime("activity_resume");
+    }
+
+    @Override
+    protected void onPause() {
+        // T10S 的定制系统在快速切换任务时偶尔延迟甚至跳过 onStop 回调。
+        // onPause 一定发生在界面失去前台时，用它及时恢复悬浮入口；onResume 会立即隐藏。
+        // 不依赖 isChangingConfigurations：T10S 桌面切换会被固件误报为配置变化。
+        // 即使是真实旋转，紧随其后的 onResume 也会立即隐藏悬浮球。
+        Log.i(TAG, "onPause -> overlay background");
+        KeepAliveService.request(this, KeepAliveService.ACTION_APP_BACKGROUND);
+        super.onPause();
+    }
+
+    @Override
+    protected void onUserLeaveHint() {
+        // T10S 的定制 WebView 偶尔会让 onPause 晚到数秒；用户按 Home 或切换应用时，
+        // 先同步显示悬浮入口，避免桌面上短暂找不到返回入口。
+        Log.i(TAG, "onUserLeaveHint -> overlay background");
+        KeepAliveService.request(this, KeepAliveService.ACTION_APP_BACKGROUND);
+        super.onUserLeaveHint();
     }
 
     @Override
@@ -82,7 +103,6 @@ public class MainActivity extends Activity {
         if (webView != null) {
             webView.onPause();
         }
-        KeepAliveService.request(this, KeepAliveService.ACTION_APP_BACKGROUND);
         super.onStop();
     }
 

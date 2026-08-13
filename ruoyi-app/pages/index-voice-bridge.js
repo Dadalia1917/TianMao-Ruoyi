@@ -28,10 +28,64 @@
         connectionOptions: null,
         reconnectAttempts: 0,
         reconnectTimer: null,
-        keepaliveTimer: null
+        keepaliveTimer: null,
+        foregroundHandler: null,
+        foregroundResumePending: false
       }
     },
+    mounted() {
+      this.foregroundHandler = () => this.resumeAfterNativeForeground()
+      window.addEventListener('tmallAppForeground', this.foregroundHandler)
+    },
+    beforeDestroy() {
+      if (this.foregroundHandler) {
+        window.removeEventListener('tmallAppForeground', this.foregroundHandler)
+      }
+      this.foregroundHandler = null
+    },
     methods: {
+      async resumeAfterNativeForeground() {
+        if (this.foregroundResumePending) return
+        this.foregroundResumePending = true
+        try {
+          if (this.playbackContext && this.playbackContext.state === 'suspended') {
+            await this.playbackContext.resume().catch(() => {})
+          }
+
+          if (this.manualStop || !this.connectionOptions) return
+
+          const socket = this.socket
+          if (!socket || socket.readyState === WebSocket.CLOSING || socket.readyState === WebSocket.CLOSED) {
+            if (this.reconnectTimer) {
+              clearTimeout(this.reconnectTimer)
+              this.reconnectTimer = null
+            }
+            this.openSocket()
+            return
+          }
+
+          if (socket.readyState !== WebSocket.OPEN) return
+
+          const tracks = this.mediaStream ? this.mediaStream.getAudioTracks() : []
+          const hasLiveMicrophone = tracks.some(track => track.readyState === 'live')
+          const captureReady = this.captureContext && this.captureContext.state !== 'closed'
+          if (!hasLiveMicrophone || !captureReady) {
+            await this.startCapture()
+          } else if (this.captureContext.state === 'suspended') {
+            await this.captureContext.resume().catch(() => {})
+          }
+          this.emit({ type: 'ready', continuous: true, resumed: true })
+        } catch (error) {
+          this.emit({ type: 'reconnecting', message: '正在恢复悬浮窗返回后的语音连接' })
+          if (this.socket) {
+            try { this.socket.close(1012, 'resume realtime session') } catch (closeError) {}
+          } else {
+            this.scheduleReconnect(error.message || String(error))
+          }
+        } finally {
+          this.foregroundResumePending = false
+        }
+      },
       unlockAudio() {
         const context = this.ensurePlaybackContext()
         if (context && context.state === 'suspended') context.resume().catch(() => {})
