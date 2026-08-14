@@ -299,6 +299,59 @@
 .model-name { font-size: 29rpx; font-weight: 650; color: #292b35; }
 .model-subtitle { margin-top: 4rpx; font-size: 18rpx; color: #a1a4b0; }
 
+.exit-app-button {
+  height: 64rpx;
+  margin: 0;
+  padding: 0 22rpx;
+  border: 1rpx solid rgba(145, 151, 171, 0.2);
+  border-radius: 32rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10rpx;
+  background: rgba(255, 255, 255, 0.86);
+  color: #686d7e;
+  box-shadow: 0 8rpx 24rpx rgba(75, 85, 115, 0.08);
+  font-size: 21rpx;
+  line-height: 1;
+}
+
+.exit-app-button::after { border: 0; }
+.exit-app-button:active { background: #f2f4f9; transform: scale(0.97); }
+.exit-app-label { color: inherit; font-size: inherit; line-height: 1; }
+.exit-app-icon { position: relative; width: 28rpx; height: 28rpx; color: currentColor; }
+.exit-app-door {
+  position: absolute;
+  left: 1rpx;
+  top: 3rpx;
+  width: 15rpx;
+  height: 22rpx;
+  box-sizing: border-box;
+  border: 2rpx solid currentColor;
+  border-right: 0;
+  border-radius: 5rpx 0 0 5rpx;
+}
+.exit-app-arrow {
+  position: absolute;
+  right: 0;
+  top: 13rpx;
+  width: 18rpx;
+  height: 2rpx;
+  border-radius: 2rpx;
+  background: currentColor;
+}
+.exit-app-arrow::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: -4rpx;
+  width: 8rpx;
+  height: 8rpx;
+  border-top: 2rpx solid currentColor;
+  border-right: 2rpx solid currentColor;
+  transform: rotate(45deg);
+}
+
 .voice-page {
   position: relative;
   z-index: 2;
@@ -348,8 +401,9 @@
 .orb-ring { position: absolute; border: 2rpx solid rgba(126, 174, 238, 0.18); border-radius: 50%; opacity: 0; }
 .ring-one { width: 332rpx; height: 332rpx; }
 .ring-two { width: 374rpx; height: 374rpx; }
-.orb-rings.orb-listening .ring-one, .orb-rings.orb-speaking .ring-one { animation: ring-pulse 2s ease-out infinite; }
-.orb-rings.orb-listening .ring-two, .orb-rings.orb-speaking .ring-two { animation: ring-pulse 2s 0.7s ease-out infinite; }
+.orb-rings.orb-listening .ring-one, .orb-rings.orb-speaking .ring-one { animation: ring-pulse 1.7s ease-out infinite; }
+.orb-rings.orb-listening .ring-two, .orb-rings.orb-speaking .ring-two { animation: ring-pulse 1.7s .55s ease-out infinite; }
+.orb-rings.orb-thinking .ring-one { animation: ring-pulse 2.5s ease-out infinite; }
 
 .live-transcript {
   width: 100%;
@@ -597,11 +651,54 @@
 .orb-glow { position: absolute; border-radius: 50%; filter: blur(22rpx); mix-blend-mode: screen; }
 .orb-glow-one { width: 68%; height: 55%; top: 5%; left: 10%; background: rgba(255,255,255,.54); transform: rotate(-22deg); }
 .orb-glow-two { width: 48%; height: 70%; right: -4%; bottom: 2%; background: rgba(70,236,255,.36); }
-.orb-connecting { animation: soft-pulse 1.15s ease-in-out infinite; }
-.orb-listening { animation: breathe 2.35s ease-in-out infinite; }
-.orb-thinking { animation: think 2.4s linear infinite; }
-.orb-speaking { animation: speak .82s ease-in-out infinite alternate; }
-.orb-sleeping, .orb-ended, .orb-error, .orb-muted { filter: saturate(.55); opacity: .72; }
+
+.orb-listening-wave,
+.orb-listening-core {
+  position: absolute;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .35s ease;
+}
+
+.orb-listening-wave {
+  inset: 12%;
+  border: 3rpx solid rgba(226, 251, 255, .56);
+  border-left-color: rgba(79, 211, 255, .18);
+  border-bottom-color: rgba(146, 166, 255, .2);
+  border-radius: 44% 56% 52% 48%;
+  filter: drop-shadow(0 0 14rpx rgba(89, 220, 255, .48));
+}
+
+.orb-listening-wave-two {
+  inset: 23%;
+  border-width: 2rpx;
+  border-radius: 58% 42% 48% 52%;
+}
+
+.orb-listening-core {
+  width: 32%;
+  height: 32%;
+  left: 34%;
+  top: 34%;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255,255,255,.86) 0%, rgba(125,231,255,.2) 58%, transparent 72%);
+  filter: blur(3rpx);
+}
+
+.assistant-orb.orb-connecting { animation: soft-pulse 1.15s ease-in-out infinite; }
+.assistant-orb.orb-sleeping { animation: standby-breathe 4.4s ease-in-out infinite; }
+.assistant-orb.orb-listening {
+  animation: listening-breathe 1.55s ease-in-out infinite;
+  box-shadow: inset 20rpx 20rpx 48rpx rgba(255,255,255,.7), inset -28rpx -18rpx 64rpx rgba(70,177,255,.26), 0 0 54rpx rgba(80,216,255,.25), 0 34rpx 82rpx rgba(97,132,217,.2);
+}
+.assistant-orb.orb-thinking { animation: think 2.4s linear infinite; }
+.assistant-orb.orb-speaking { animation: speak .82s ease-in-out infinite alternate; }
+.assistant-orb.orb-listening .orb-listening-wave-one { opacity: .92; animation: listen-wave-spin 3.8s linear infinite; }
+.assistant-orb.orb-listening .orb-listening-wave-two { opacity: .68; animation: listen-wave-spin-reverse 2.9s linear infinite; }
+.assistant-orb.orb-listening .orb-listening-core { opacity: .82; animation: listen-core 1.25s ease-in-out infinite; }
+.assistant-orb.orb-speaking .orb-listening-wave-one { opacity: .48; animation: listen-wave-spin 4.6s linear infinite; }
+.orb-shadow.orb-listening { transform: scale(1.08); opacity: .95; }
+.assistant-orb.orb-sleeping, .assistant-orb.orb-ended, .assistant-orb.orb-error, .assistant-orb.orb-muted { filter: saturate(.62); opacity: .76; }
 
 .status-area {
   z-index: 3;
@@ -648,10 +745,15 @@
 .mic-icon.muted::after { content: ''; position: absolute; left: 1rpx; top: 21rpx; width: 44rpx; height: 4rpx; border-radius: 3rpx; background: #ee405d; box-shadow: 0 0 0 2rpx rgba(255,255,255,.9); transform: rotate(45deg); }
 
 @keyframes breathe { 0%, 100% { transform: scale(.97) translateY(2rpx); } 50% { transform: scale(1.035) translateY(-4rpx); } }
+@keyframes standby-breathe { 0%, 100% { transform: scale(.965) translateY(3rpx); } 50% { transform: scale(1.012) translateY(-2rpx); } }
+@keyframes listening-breathe { 0%, 100% { transform: scale(1.035) translateY(1rpx); } 50% { transform: scale(1.09) translateY(-6rpx); } }
 @keyframes soft-pulse { 0%, 100% { transform: scale(.96); opacity: .75; } 50% { transform: scale(1.02); opacity: 1; } }
 @keyframes think { 0% { transform: rotate(0deg) scale(.99); filter: hue-rotate(0deg); } 50% { transform: rotate(180deg) scale(1.025); filter: hue-rotate(18deg); } 100% { transform: rotate(360deg) scale(.99); filter: hue-rotate(0deg); } }
 @keyframes speak { from { transform: scale(.98); } to { transform: scale(1.045); } }
 @keyframes bars { from { transform: scaleY(.55); opacity: .72; } to { transform: scaleY(1.2); opacity: 1; } }
+@keyframes listen-wave-spin { from { transform: rotate(0deg) scale(.93); } 50% { transform: rotate(180deg) scale(1.06); } to { transform: rotate(360deg) scale(.93); } }
+@keyframes listen-wave-spin-reverse { from { transform: rotate(360deg) scale(1.04); } 50% { transform: rotate(180deg) scale(.9); } to { transform: rotate(0deg) scale(1.04); } }
+@keyframes listen-core { 0%, 100% { transform: scale(.72); opacity: .46; } 50% { transform: scale(1.28); opacity: .92; } }
 
 @keyframes ring-pulse {
   0% { transform: scale(0.78); opacity: 0; }
@@ -661,6 +763,14 @@
 
 @keyframes dot-blink { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
 @keyframes availability-pulse { 0%, 100% { transform: scale(0.9); opacity: 0.75; } 50% { transform: scale(1.08); opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .assistant-orb,
+  .orb-ring,
+  .orb-listening-wave,
+  .orb-listening-core,
+  .voice-bar { animation-duration: 4s !important; }
+}
 
 @media screen and (min-width: 960px) {
   .drawer-mask, .sidebar-close, .menu-button { display: none; }
@@ -715,6 +825,11 @@
   .model-name { font-size: 19px; }
   .model-subtitle { margin-top: 3px; font-size: 11px; }
   .header-icon { width: 44px; height: 44px; border-radius: 14px !important; }
+  .exit-app-button { height: 38px; padding: 0 15px; border-radius: 19px; gap: 7px; font-size: 13px; }
+  .exit-app-icon { width: 18px; height: 18px; }
+  .exit-app-door { left: 1px; top: 1px; width: 10px; height: 16px; border-width: 1.5px; border-radius: 3px 0 0 3px; }
+  .exit-app-arrow { top: 8px; width: 12px; height: 1.5px; }
+  .exit-app-arrow::after { top: -3px; width: 6px; height: 6px; border-width: 1.5px; }
   .voice-page, .record-detail, .memory-page { height: calc(100vh - 86px); }
   .voice-page { padding: 8px 5vw 28px; }
   .session-meter { min-height: 38px; padding: 0 16px; border-radius: 14px; font-size: 14px; }

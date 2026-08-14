@@ -1,6 +1,6 @@
 # 天猫智家 Android 原生容器
 
-**产品版本：v1.1.0 · 文档更新时间：2026 年 8 月 14 日 12:00:44（UTC+8）**
+**产品版本：v1.1.0 · 文档更新时间：2026 年 8 月 14 日 18:22:47（UTC+8）**
 
 该工程把 `ruoyi-app` 的 H5 产物装入 Android WebView，并为天猫精灵智慧屏 T10S 提供麦克风、开机悬浮入口和本机智能家居指令桥接。
 
@@ -11,15 +11,15 @@ T10S 固件会静默忽略第三方应用在开机广播中直接发出的前台
 1. `OverlayBootReceiver` 接收 `BOOT_COMPLETED`、快速启动或应用覆盖安装广播。
 2. Receiver 启动 1×1、透明、不进入最近任务的 `OverlayBootstrapActivity`。
 3. Bootstrap Activity 在正常 Activity 上下文中启动 `KeepAliveService`，约 300ms 内自动退出并返回天猫精灵原界面。
-4. `KeepAliveService` 以前台服务形式持有右上角“智”悬浮球；只有用户点击悬浮球才打开 `MainActivity`。
-5. APP 进入前台时隐藏悬浮球，按 Home、切换应用或进入后台时通过 `onPause/onUserLeaveHint` 恢复悬浮球。
+4. `KeepAliveService` 以前台服务形式持有右上角老鼠品牌图标悬浮球；冷启动后用户首次点击悬浮球打开 `MainActivity`。
+5. 助手首次启动后，原生容器在返回天猫精灵主页或切换到后台时继续维持 WebView、麦克风和 WebSocket；悬浮球与前台页面都可接收“管家”唤醒。右上角退出按钮只回到天猫精灵主页，不杀死常驻运行时。
 
-2026 年 8 月 13 日已完成真实重启验证：引导 Activity 启动服务后返回 `com.alibaba.genie.panel`，完整助手 UI 未自动打开；悬浮球持续可见，点击后可恢复 APP。2026 年 8 月 14 日 12:00:44（UTC+8）加入硬唤醒与主动结束对话状态机后重新构建，正式 APK SHA-256 为 `652FD50436BAB5FE42A9B0F7740F34008A8E6E1B5AEE40049C4A56E7849B4D5F`，并已通过 v1/v2 签名校验。
+2026 年 8 月 13 日已完成真实重启验证：引导 Activity 启动服务后返回 `com.alibaba.genie.panel`，完整助手 UI 未自动打开；悬浮球持续可见，点击后可恢复 APP。2026 年 8 月 14 日 18:22:47（UTC+8）已完成常驻监听、退出回主页和待确认家居执行版本的重新构建与覆盖安装。正式 APK SHA-256 为 `661325B361B7E977F8F040A1B3B55CA056CE71189CB23E761FD17BD891CE576F`，并已通过 v1/v2 签名校验。
 
 ## T10S 家居指令链路
 
 1. WebView 在 `client.hello` 中声明 `capabilities.genie_provider=true`。
-2. FastAPI 只从 Qwen 最终用户转写中提取明确、低风险的设备操作，并下发 `assistant.home_command.pending` 结构化事件。
+2. FastAPI 从 Qwen 最终用户转写生成低风险家居计划，先播报家庭状态、证据、推荐参数和拟执行动作；只有用户明确同意后才下发 `assistant.home_command.pending` 结构化事件。
 3. `index-voice-bridge.js` 调用 `window.GenieBridge.sendToGenie(command)`。
 4. `GenieCommand` 再次检查长度、操作、设备白名单和高风险词，并从复合表达中提取最后一条明确设备指令。
 5. 原生代码调用：

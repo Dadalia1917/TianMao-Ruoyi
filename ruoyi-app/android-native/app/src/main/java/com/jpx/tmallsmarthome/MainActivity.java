@@ -100,9 +100,8 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onStop() {
-        if (webView != null) {
-            webView.onPause();
-        }
+        // 语音助手是常驻运行时：退到天猫桌面后仍需保留 WebSocket、麦克风与唤醒词检测。
+        // 不调用 webView.onPause()，否则 Chromium 会暂停音频采集并使悬浮窗唤醒失效。
         super.onStop();
     }
 
@@ -301,6 +300,13 @@ public class MainActivity extends Activity {
         } else {
             moveTaskToBack(true);
         }
+    }
+
+    /** Called by the trusted bundled UI when the user taps the top-right exit button. */
+    void returnToTmallHome() {
+        Log.i(TAG, "UI requested return to Tmall home");
+        KeepAliveService.request(this, KeepAliveService.ACTION_APP_BACKGROUND);
+        moveTaskToBack(true);
     }
 
     private void destroyWebView() {

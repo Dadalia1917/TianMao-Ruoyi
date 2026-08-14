@@ -219,7 +219,7 @@
               continuous: true,
               memoryEnabled: Boolean(event.memory_enabled),
               wakeState: this.wakeState,
-              wakePhrase: event.wake_phrase || '天猫管家'
+              wakePhrase: event.wake_phrase || '管家'
             })
           } catch (error) {
             this.emit({ type: 'error', message: `麦克风不可用：${error.message || error}` })
@@ -234,7 +234,7 @@
             state: this.wakeState,
             reason: event.reason || '',
             message: event.message || '',
-            wakePhrase: event.wake_phrase || '天猫管家'
+            wakePhrase: event.wake_phrase || '管家'
           })
           return
         }

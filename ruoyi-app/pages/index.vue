@@ -98,6 +98,13 @@
           <text class="model-name">天猫智家</text>
           <text class="model-subtitle">Qwen3.5 Omni · 实时语音</text>
         </view>
+        <button class="exit-app-button" @tap.stop="exitAssistantApp" aria-label="退出应用并返回天猫精灵主页">
+          <view class="exit-app-icon" aria-hidden="true">
+            <view class="exit-app-door"></view>
+            <view class="exit-app-arrow"></view>
+          </view>
+          <text class="exit-app-label">退出</text>
+        </button>
       </view>
 
       <view v-if="memoryPageVisible" class="memory-page">
@@ -192,13 +199,16 @@
         <view class="session-meter availability-pill">
           <view class="availability-dot" :class="{ online: isActive }"></view>
           <text class="availability-title">{{ wakeState === 'awake' ? '正在对话' : (isActive ? '等待唤醒' : '天猫智家待命中') }}</text>
-          <text class="meter-caption">{{ wakeState === 'awake' ? '已陪伴 ' + formattedElapsed : (isActive ? '请说“天猫管家”' : '云端会话自动续接') }}</text>
+          <text class="meter-caption">{{ wakeState === 'awake' ? '已陪伴 ' + formattedElapsed : (isActive ? '请说“' + wakePhrase + '”' : '云端会话自动续接') }}</text>
         </view>
 
         <view class="assistant-stage">
           <view class="orb-rings" :class="orbClass"><view class="orb-ring ring-one"></view><view class="orb-ring ring-two"></view></view>
           <view class="orb-shadow" :class="orbClass"></view>
           <view class="assistant-orb" :class="orbClass">
+            <view class="orb-listening-wave orb-listening-wave-one"></view>
+            <view class="orb-listening-wave orb-listening-wave-two"></view>
+            <view class="orb-listening-core"></view>
             <view class="orb-glow orb-glow-one"></view>
             <view class="orb-glow orb-glow-two"></view>
           </view>
@@ -239,26 +249,6 @@
           <text class="status-hint">{{ statusHint }}</text>
         </view>
 
-        <view class="controls">
-          <button class="control-button control-secondary" @tap.stop="historyVisible = true" aria-label="记录">
-            <view class="history-control-icon"><view></view><view></view><view></view></view>
-            <text class="control-label">记录</text>
-          </button>
-          <button
-            class="control-button primary-control"
-            :class="{ 'hangup-button': isActive }"
-            @tap="isActive ? endSession() : startSession()"
-            :aria-label="isActive ? '结束通话' : '开始对话'"
-          >
-            <view v-if="isActive" class="close-icon"></view>
-            <view v-else class="start-wave"><view></view><view></view><view></view></view>
-            <text class="control-label" :class="{ 'hangup-label': isActive }">{{ isActive ? '结束' : (status === 'error' ? '重试' : '开始') }}</text>
-          </button>
-          <button class="control-button control-secondary" @tap.stop="toggleMute" aria-label="麦克风">
-            <view class="mic-icon" :class="{ muted: isMuted }"><image class="mic-icon-image" src="/static/images/microphone.svg" mode="aspectFit"></image></view>
-            <text class="control-label">{{ isMuted ? '取消静音' : '静音' }}</text>
-          </button>
-        </view>
       </view>
     </view>
 
@@ -287,6 +277,7 @@
       return {
         status: 'idle',
         wakeState: 'sleeping',
+        wakePhrase: '管家',
         isMuted: false,
         elapsedSeconds: 0,
         latestUser: '',
@@ -328,7 +319,7 @@
         if (this.status === 'connecting') return '正在恢复云端连接，对话会自动续接'
         if (this.status === 'error') return this.errorMessage || '请检查服务地址后重试'
         if (this.isMuted) return '点击右下角恢复麦克风'
-        if (this.status === 'sleeping') return '请说“天猫管家”唤醒我'
+        if (this.status === 'sleeping') return `请说“${this.wakePhrase}”唤醒我`
         return '可以随时开口打断我'
       },
       orbClass() { return `orb-${this.status}${this.isMuted ? ' orb-muted' : ''}` },
@@ -361,12 +352,11 @@
       this.scheduleAutoStart(options && options.source === 'tmall' ? 180 : 450)
     },
     onShow() {
-      if (this.hasAutoStarted) this.scheduleAutoStart(280)
+      this.scheduleAutoStart(280)
     },
-    onHide() { this.cancelAutoStart() },
+    onHide() {},
     beforeUnmount() {
       this.cancelAutoStart()
-      this.endSession(true)
     },
     methods: {
       formatTime(seconds) {
@@ -443,8 +433,7 @@
         this.cancelAutoStart()
         this.autoStartTimer = setTimeout(() => {
           this.autoStartTimer = null
-          if (this.isActive || this.selectedConversation || this.memoryPageVisible) return
-          if (!['idle', 'ended'].includes(this.status)) return
+          if (this.isActive || this.status === 'connecting') return
           this.startSession()
         }, delay)
       },
@@ -490,7 +479,7 @@
         })
       },
       async startSession() {
-        if (this.isActive || this.selectedConversation || this.memoryPageVisible) return
+        if (this.isActive || this.status === 'connecting') return
         if (!(await this.requestMicrophonePermission())) {
           this.status = 'ended'
           return
@@ -524,16 +513,35 @@
           this.isMuted = false
         }
       },
+      exitAssistantApp() {
+        this.historyVisible = false
+        this.$nextTick(() => {
+          setTimeout(() => {
+            try {
+              if (typeof window !== 'undefined'
+                && window.GenieBridge
+                && typeof window.GenieBridge.exitToHome === 'function') {
+                window.GenieBridge.exitToHome()
+                return
+              }
+            } catch (error) {
+              console.warn('返回天猫精灵主页失败', error)
+            }
+            if (typeof window !== 'undefined' && window.history.length > 1) {
+              window.history.back()
+            }
+          }, 80)
+        })
+      },
       newConversation() {
-        if (this.isActive) this.endSession(true)
         this.selectedConversationId = ''
         this.memoryPageVisible = false
         this.currentConversation = null
         this.latestUser = ''
         this.latestAssistant = ''
-        this.status = 'idle'
+        if (!this.isActive) this.status = 'idle'
         this.historyVisible = false
-        this.startSession()
+        if (!this.isActive && this.status !== 'connecting') this.startSession()
       },
       appendUserMessage(content) {
         const text = String(content || '').trim()
@@ -584,7 +592,6 @@
         this.conversationHistory = saveAssistantHistory([current, ...rest], this.historyOwner)
       },
       openConversation(id) {
-        if (this.isActive) this.endSession()
         this.memoryPageVisible = false
         this.selectedConversationId = id
         this.historyVisible = false
@@ -592,12 +599,10 @@
       },
       closeConversation() { this.selectedConversationId = '' },
       openTextChatPage() {
-        if (this.isActive) this.endSession(true)
         this.historyVisible = false
         uni.navigateTo({ url: '/pages/text-chat' })
       },
       async openMemoryPage() {
-        if (this.isActive) this.endSession(true)
         this.selectedConversationId = ''
         this.memoryPageVisible = true
         this.historyVisible = false
@@ -715,6 +720,10 @@
         this.finalizeCurrentConversation()
         this.status = 'sleeping'
       },
+      applyWakePhrase(phrase) {
+        const nextPhrase = String(phrase || '').trim()
+        this.wakePhrase = nextPhrase || '管家'
+      },
       startTimer() {
         this.stopTimer()
         this.timer = setInterval(() => {
@@ -725,8 +734,14 @@
       onVoiceEvent(event) {
         if (!event || !event.type) return
         switch (event.type) {
-          case 'ready': this.applyWakeState(event.wakeState || 'sleeping'); break
-          case 'wake.state': this.applyWakeState(event.state); break
+          case 'ready':
+            this.applyWakePhrase(event.wakePhrase)
+            this.applyWakeState(event.wakeState || 'sleeping')
+            break
+          case 'wake.state':
+            this.applyWakePhrase(event.wakePhrase)
+            this.applyWakeState(event.state)
+            break
           case 'reconnecting': this.status = 'connecting'; this.errorMessage = event.message || ''; break
           case 'speech.started': if (this.wakeState === 'awake') this.status = 'listening'; break
           case 'speech.stopped':

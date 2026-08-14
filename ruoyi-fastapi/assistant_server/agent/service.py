@@ -296,9 +296,9 @@ class HouseholdAgentService:
             action = "open"
         else:
             action = "set"
-        needs_context = device in {"空调", "灯"} and action in {"open", "set"}
+        needs_context = True
         return {
-            "route": "contextual" if needs_context else "direct",
+            "route": "contextual",
             "device": device,
             "room": room,
             "action": action,
@@ -504,16 +504,14 @@ class HouseholdAgentService:
             parameters=parameters,
             action_level=ActionLevel.A2 if device in {"空调", "灯"} else ActionLevel.A1,
             risk_level=state.get("risk_level", RiskLevel.L1),
-            requires_confirmation=False,
+            requires_confirmation=True,
         )
         return {
             "decision": self._base_decision(
                 state,
                 status=DecisionStatus.EXECUTE,
-                user_message=(
-                    self._contextual_user_message(state, state.get("evidence", []), parameters)
-                    if state.get("needs_context")
-                    else plan.user_message
+                user_message=self._contextual_user_message(
+                    state, state.get("evidence", []), parameters
                 ),
                 rationale=plan.rationale,
                 action=action,
@@ -736,10 +734,12 @@ class HouseholdAgentService:
             if isinstance(outside, (int, float)):
                 parts.append(f"室外{float(outside):.1f}℃")
             prefix = "，".join(parts)
-            if power is True or str(power).lower() in {"on", "true", "1", "开启"}:
-                action = f"空调已经开启，我将把它调整为{target}℃"
+            if state.get("action") == "close":
+                action = "建议关闭空调"
+            elif power is True or str(power).lower() in {"on", "true", "1", "开启"}:
+                action = f"空调已经开启，建议调整为{target}℃"
             else:
-                action = f"我将为您打开空调并设置为{target}℃"
+                action = f"建议打开空调并设置为{target}℃"
             return f"{prefix}；{action}。" if prefix else f"{action}。"
         if state.get("device") == "灯":
             lux = household.data.get("illuminance_lux") if household else None
@@ -749,12 +749,18 @@ class HouseholdAgentService:
                 if isinstance(lux, (int, float))
                 else ""
             )
-            return f"{prefix}我将把灯光调整为{brightness}%亮度。"
+            action = (
+                "建议关闭灯光"
+                if state.get("action") == "close"
+                else f"建议把灯光调整为{brightness}%亮度"
+            )
+            return f"{prefix}{action}。"
         if state.get("comfort_intent") == "humid":
-            return f"{room}湿度偏高，我将为您开启除湿机。"
+            return f"{room}湿度偏高，建议开启除湿机。"
         if state.get("comfort_intent") == "dry":
-            return f"{room}空气偏干，我将为您开启加湿器。"
-        return "已结合当前家庭状态生成控制方案，准备为您处理。"
+            return f"{room}空气偏干，建议开启加湿器。"
+        household_summary = household.summary if household else "当前家庭状态暂以可用信息为准"
+        return f"{household_summary}；建议执行：{state['request'].transcript}。"
 
     def _normalize_command(self, transcript: str) -> str:
         command = "".join(str(transcript or "").split())
@@ -766,7 +772,7 @@ class HouseholdAgentService:
         ]
         if candidates:
             command = candidates[-1]
-        command = re.sub(r"^(?:天猫管家|天猫智家|智能管家|曼巴管家)[，,：:、]?", "", command)
+        command = re.sub(r"^(?:天猫管家|天猫智家|智能管家|曼巴管家|管家)[，,：:、]?", "", command)
         command = re.sub(r"^(?:请|麻烦|劳驾|帮我|给我|替我)", "", command)
         command = re.sub(r"^(?:让|叫|请)?天猫精灵(?:帮我|给我|替我)?", "", command)
         command = re.sub(r"^(?:请|麻烦|劳驾|帮我|给我|替我)", "", command)

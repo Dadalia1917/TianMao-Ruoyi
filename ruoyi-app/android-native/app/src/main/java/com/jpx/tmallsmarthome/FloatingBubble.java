@@ -16,7 +16,7 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.WindowManager;
-import android.widget.TextView;
+import android.widget.ImageView;
 
 /** Draggable, debounced entry bubble shown only while the assistant is in background. */
 public final class FloatingBubble {
@@ -53,22 +53,21 @@ public final class FloatingBubble {
         }
 
         float density = context.getResources().getDisplayMetrics().density;
-        int size = Math.round(56 * density);
+        int size = Math.round(64 * density);
         int edge = Math.round(20 * density);
 
-        TextView bubble = new TextView(context);
-        bubble.setText("智");
-        bubble.setTextColor(0xFFFFFFFF);
-        bubble.setTextSize(18);
-        bubble.setGravity(Gravity.CENTER);
+        ImageView bubble = new ImageView(context);
+        bubble.setImageResource(R.drawable.floating_bubble_icon);
+        bubble.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        int padding = Math.round(4 * density);
+        bubble.setPadding(padding, padding, padding, padding);
         bubble.setContentDescription("打开天猫智家");
         bubble.setElevation(12 * density);
 
         GradientDrawable background = new GradientDrawable();
         background.setShape(GradientDrawable.OVAL);
-        background.setColors(new int[]{0xFF7584F4, 0xFF49C5E8});
-        background.setGradientType(GradientDrawable.LINEAR_GRADIENT);
-        background.setStroke(Math.max(2, Math.round(2 * density)), 0xE6FFFFFF);
+        background.setColor(0xFFFFFCF8);
+        background.setStroke(Math.max(1, Math.round(density)), 0x66DCA67D);
         bubble.setBackground(background);
         bubble.setOnClickListener(view -> openApplication());
 

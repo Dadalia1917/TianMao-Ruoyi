@@ -8,10 +8,12 @@ import org.json.JSONObject;
 
 /** JavaScript surface exposed only to the bundled assistant UI. */
 public final class GenieJsBridge {
+    private final MainActivity activity;
     private final Context appContext;
 
-    GenieJsBridge(Context context) {
-        this.appContext = context.getApplicationContext();
+    GenieJsBridge(MainActivity activity) {
+        this.activity = activity;
+        this.appContext = activity.getApplicationContext();
     }
 
     @JavascriptInterface
@@ -34,6 +36,12 @@ public final class GenieJsBridge {
         } catch (RuntimeException error) {
             return result(false, "天猫精灵指令通道暂不可用");
         }
+    }
+
+    /** End the assistant UI session and return to the T10S launcher without killing the process. */
+    @JavascriptInterface
+    public void exitToHome() {
+        activity.runOnUiThread(activity::returnToTmallHome);
     }
 
     private static String result(boolean accepted, String message) {
