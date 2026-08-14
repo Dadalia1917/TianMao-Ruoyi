@@ -1,7 +1,7 @@
 FROM maven:3.9-eclipse-temurin-17-alpine AS builder
 
 WORKDIR /workspace
-COPY deploy/docker/maven-settings.xml /root/.m2/settings.xml
+COPY ruoyi-docker/config/maven-settings.xml /root/.m2/settings.xml
 COPY pom.xml ./
 COPY ruoyi-common/pom.xml ruoyi-common/pom.xml
 COPY ruoyi-system/pom.xml ruoyi-system/pom.xml

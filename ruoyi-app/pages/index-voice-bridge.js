@@ -25,6 +25,7 @@
         playbackTimer: null,
         speakingSent: false,
         responding: false,
+        wakeState: 'sleeping',
         connectionOptions: null,
         reconnectAttempts: 0,
         reconnectTimer: null,
@@ -74,7 +75,7 @@
           } else if (this.captureContext.state === 'suspended') {
             await this.captureContext.resume().catch(() => {})
           }
-          this.emit({ type: 'ready', continuous: true, resumed: true })
+          this.emit({ type: 'ready', continuous: true, resumed: true, wakeState: this.wakeState })
         } catch (error) {
           this.emit({ type: 'reconnecting', message: '正在恢复悬浮窗返回后的语音连接' })
           if (this.socket) {
@@ -110,6 +111,7 @@
         this.assistantText = ''
         this.speakingSent = false
         this.responding = false
+        this.wakeState = 'sleeping'
         this.connectionOptions = {
           url: options.url,
           token: options.token || '',
@@ -146,6 +148,7 @@
             this.clearPlayback()
             // 连接若在播报期间中断，不能把半双工抑制状态带到重连会话。
             this.resetAcousticRelay()
+            this.wakeState = 'sleeping'
             if (this.manualStop) {
               this.emit({ type: 'closed' })
             } else {
@@ -190,6 +193,7 @@
         this.stopCapture()
         this.clearPlayback()
         this.resetAcousticRelay()
+        this.wakeState = 'sleeping'
         const socket = this.socket
         this.socket = null
         this.connectionOptions = null
@@ -208,12 +212,30 @@
         if (type === 'assistant.session.ready') {
           try {
             this.reconnectAttempts = 0
+            this.wakeState = event.wake_state === 'awake' ? 'awake' : 'sleeping'
             await this.startCapture()
-            this.emit({ type: 'ready', continuous: true, memoryEnabled: Boolean(event.memory_enabled) })
+            this.emit({
+              type: 'ready',
+              continuous: true,
+              memoryEnabled: Boolean(event.memory_enabled),
+              wakeState: this.wakeState,
+              wakePhrase: event.wake_phrase || '天猫管家'
+            })
           } catch (error) {
             this.emit({ type: 'error', message: `麦克风不可用：${error.message || error}` })
             this.stop(false)
           }
+          return
+        }
+        if (type === 'assistant.wake_state') {
+          this.wakeState = event.state === 'awake' ? 'awake' : 'sleeping'
+          this.emit({
+            type: 'wake.state',
+            state: this.wakeState,
+            reason: event.reason || '',
+            message: event.message || '',
+            wakePhrase: event.wake_phrase || '天猫管家'
+          })
           return
         }
         if (type === 'assistant.acoustic_relay.pending') {
@@ -221,6 +243,15 @@
           return
         }
         if (type === 'assistant.home_command.pending') {
+          if (this.wakeState !== 'awake') {
+            this.sendHomeCommandResult(
+              event,
+              'rejected',
+              '对话已经结束，未执行延迟到达的家居指令',
+              String((event && event.command) || '').trim()
+            )
+            return
+          }
           this.executeHomeCommand(event)
           return
         }
@@ -234,6 +265,9 @@
         if (type === 'input_audio_buffer.speech_started') {
           // 声学转发期间，本机扬声器和附近天猫精灵的回应都不能回灌给 Omni。
           if (this.captureSuppressed) return
+          // 休眠时麦克风只供服务端识别唤醒词，不能呈现成一次普通对话，
+          // 也不能因为环境声去打断或清空任何回复。
+          if (this.wakeState !== 'awake') return
           if (this.responding && this.socket && this.socket.readyState === WebSocket.OPEN) {
             this.socket.send(JSON.stringify({ type: 'response.cancel' }))
           }
@@ -244,6 +278,7 @@
           return
         }
         if (type === 'input_audio_buffer.speech_stopped') {
+          if (this.wakeState !== 'awake') return
           this.emit({ type: 'speech.stopped' })
           return
         }
@@ -501,7 +536,10 @@
         this.emit({
           type: 'home.command.started',
           command,
-          message: (event && event.message) || '正在通过天猫精灵执行家居指令'
+          message: (event && event.message) || '正在通过天猫精灵执行家居指令',
+          rationale: (event && event.rationale) || '',
+          decisionBasis: (event && event.decision_basis) || [],
+          evidence: (event && event.evidence) || []
         })
         try {
           const rawResult = window.GenieBridge.sendToGenie(command)

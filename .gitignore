@@ -52,7 +52,7 @@ nbdist/
 .env.*.local
 !.env.example
 !**/.env.example
-deploy/docker/.env
+ruoyi-docker/.env
 
 # Android signing and local package artifacts
 ruoyi-app/apk/.signing/

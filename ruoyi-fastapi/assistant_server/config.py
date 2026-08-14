@@ -106,6 +106,12 @@ class Settings:
     agent_timezone: str
     agent_weather_enabled: bool
     agent_simulated_environment_enabled: bool
+    agent_household_state_ttl_seconds: int
+    agent_default_room: str
+    agent_state_redis_host: str
+    agent_state_redis_port: int
+    agent_state_redis_password: str
+    agent_state_redis_db: int
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -220,6 +226,19 @@ class Settings:
             agent_simulated_environment_enabled=_as_bool(
                 "AGENT_SIMULATED_ENVIRONMENT_ENABLED", True
             ),
+            agent_household_state_ttl_seconds=_as_int(
+                "AGENT_HOUSEHOLD_STATE_TTL_SECONDS", 300, 30
+            ),
+            agent_default_room=os.getenv("AGENT_DEFAULT_ROOM", "客厅").strip()
+            or "客厅",
+            agent_state_redis_host=os.getenv(
+                "AGENT_STATE_REDIS_HOST", ""
+            ).strip(),
+            agent_state_redis_port=_as_int("AGENT_STATE_REDIS_PORT", 6379, 1),
+            agent_state_redis_password=os.getenv(
+                "AGENT_STATE_REDIS_PASSWORD", ""
+            ),
+            agent_state_redis_db=_as_int("AGENT_STATE_REDIS_DB", 1, 0),
         )
 
     @property

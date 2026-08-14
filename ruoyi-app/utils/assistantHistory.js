@@ -10,11 +10,15 @@ function storageKey(ownerKey) {
 
 function normalizeMessage(message) {
   const role = message && message.role === 'assistant' ? 'assistant' : 'user'
+  const decisionBasis = Array.isArray(message && message.decisionBasis)
+    ? message.decisionBasis.map(item => String(item || '').trim().slice(0, 180)).filter(Boolean).slice(0, 8)
+    : []
   return {
     id: String((message && message.id) || `${Date.now()}-${Math.random()}`),
     role,
     content: String((message && message.content) || '').slice(0, MAX_MESSAGE_CHARS),
-    createdAt: Number((message && message.createdAt) || Date.now())
+    createdAt: Number((message && message.createdAt) || Date.now()),
+    decisionBasis
   }
 }
 
@@ -75,13 +79,16 @@ export function makeConversationId() {
   return `voice-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
 }
 
-export function makeMessage(role, content, streaming = false) {
+export function makeMessage(role, content, streaming = false, decisionBasis = []) {
   return {
     id: `message-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     role,
     content: String(content || '').slice(0, MAX_MESSAGE_CHARS),
     createdAt: Date.now(),
-    streaming
+    streaming,
+    decisionBasis: Array.isArray(decisionBasis)
+      ? decisionBasis.map(item => String(item || '').trim().slice(0, 180)).filter(Boolean).slice(0, 8)
+      : []
   }
 }
 

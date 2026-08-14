@@ -160,6 +160,13 @@
               <view class="message-body">
                 <text class="message-role">{{ message.role === 'user' ? '你' : '天猫智家' }}</text>
                 <text class="message-text" selectable>{{ message.content }}</text>
+                <view v-if="message.decisionBasis && message.decisionBasis.length" class="decision-basis detail-decision-basis">
+                  <text class="decision-basis-title">本次参考</text>
+                  <view v-for="(basis, index) in message.decisionBasis" :key="`${message.id}-basis-${index}`" class="decision-basis-item">
+                    <view class="decision-basis-dot"></view>
+                    <text selectable>{{ basis }}</text>
+                  </view>
+                </view>
                 <button class="copy-action" @tap="copyMessage(message.content)">复制</button>
               </view>
             </view>
@@ -184,8 +191,8 @@
       <view v-else class="voice-page">
         <view class="session-meter availability-pill">
           <view class="availability-dot" :class="{ online: isActive }"></view>
-          <text class="availability-title">{{ isActive ? '在线待命' : '天猫智家待命中' }}</text>
-          <text class="meter-caption">{{ isActive ? '已陪伴 ' + formattedElapsed : '云端会话自动续接' }}</text>
+          <text class="availability-title">{{ wakeState === 'awake' ? '正在对话' : (isActive ? '等待唤醒' : '天猫智家待命中') }}</text>
+          <text class="meter-caption">{{ wakeState === 'awake' ? '已陪伴 ' + formattedElapsed : (isActive ? '请说“天猫管家”' : '云端会话自动续接') }}</text>
         </view>
 
         <view class="assistant-stage">
@@ -209,7 +216,16 @@
             :class="`live-${message.role}`"
           >
             <text class="live-role">{{ message.role === 'user' ? '你' : '管家' }}</text>
-            <text class="live-text">{{ message.content }}</text>
+            <view class="live-message-copy">
+              <text class="live-text">{{ message.content }}</text>
+              <view v-if="message.decisionBasis && message.decisionBasis.length" class="decision-basis live-decision-basis">
+                <text class="decision-basis-title">本次参考</text>
+                <view v-for="(basis, index) in message.decisionBasis" :key="`${message.id}-live-basis-${index}`" class="decision-basis-item">
+                  <view class="decision-basis-dot"></view>
+                  <text>{{ basis }}</text>
+                </view>
+              </view>
+            </view>
             <view v-if="message.streaming" class="typing-dot"></view>
           </view>
         </view>
@@ -270,6 +286,7 @@
       const historyOwner = String(storage.get(constant.id) || storage.get(constant.name) || 'signed-in')
       return {
         status: 'idle',
+        wakeState: 'sleeping',
         isMuted: false,
         elapsedSeconds: 0,
         latestUser: '',
@@ -299,6 +316,7 @@
       statusTitle() {
         const labels = {
           idle: '正在进入待命', connecting: '正在连接',
+          sleeping: '等待唤醒',
           listening: this.isMuted ? '麦克风已静音' : '我在听', thinking: '正在思考',
           speaking: '正在回复', error: '连接遇到问题', ended: '还想聊点什么？'
         }
@@ -310,10 +328,11 @@
         if (this.status === 'connecting') return '正在恢复云端连接，对话会自动续接'
         if (this.status === 'error') return this.errorMessage || '请检查服务地址后重试'
         if (this.isMuted) return '点击右下角恢复麦克风'
+        if (this.status === 'sleeping') return '请说“天猫管家”唤醒我'
         return '可以随时开口打断我'
       },
       orbClass() { return `orb-${this.status}${this.isMuted ? ' orb-muted' : ''}` },
-      isActive() { return ['connecting', 'listening', 'thinking', 'speaking'].includes(this.status) },
+      isActive() { return ['connecting', 'sleeping', 'listening', 'thinking', 'speaking'].includes(this.status) },
       selectedConversation() {
         return this.conversationHistory.find(item => item.id === this.selectedConversationId) || null
       },
@@ -488,6 +507,7 @@
         this.latestAssistant = ''
         this.errorMessage = ''
         this.isMuted = false
+        this.wakeState = 'sleeping'
         this.status = 'connecting'
         this.hasAutoStarted = true
         this.createCurrentConversation()
@@ -498,6 +518,7 @@
         this.stopTimer()
         if (shouldSignal) this.voiceCommand = { serial: this.voiceCommand.serial + 1, action: 'stop' }
         this.finalizeCurrentConversation()
+        this.wakeState = 'sleeping'
         if (!silent) {
           this.status = 'ended'
           this.isMuted = false
@@ -526,17 +547,23 @@
         this.latestUser = text
         this.persistCurrentConversation()
       },
-      updateAssistantMessage(content, final = false) {
+      updateAssistantMessage(content, final = false, decisionBasis = []) {
         const text = String(content || '').trim()
         if (!text) return
+        const safeBasis = Array.isArray(decisionBasis)
+          ? decisionBasis.map(item => String(item || '').trim()).filter(Boolean).slice(0, 8)
+          : []
         if (!this.currentConversation) this.createCurrentConversation()
         const messages = this.currentConversation.messages
         const last = messages[messages.length - 1]
         if (last && last.role === 'assistant' && last.streaming) {
           last.content = text
           last.streaming = !final
+          if (safeBasis.length) last.decisionBasis = safeBasis
         } else if (!(last && last.role === 'assistant' && last.content === text)) {
-          messages.push(makeMessage('assistant', text, !final))
+          messages.push(makeMessage('assistant', text, !final, safeBasis))
+        } else if (safeBasis.length) {
+          last.decisionBasis = safeBasis
         }
         this.currentConversation.updatedAt = Date.now()
         this.latestAssistant = text
@@ -666,7 +693,27 @@
         }
         this.isMuted = !this.isMuted
         this.voiceCommand = { serial: this.voiceCommand.serial + 1, action: 'mute', muted: this.isMuted }
-        if (!this.isMuted) this.status = 'listening'
+        if (!this.isMuted) this.status = this.wakeState === 'awake' ? 'listening' : 'sleeping'
+      },
+      applyWakeState(state) {
+        const nextState = state === 'awake' ? 'awake' : 'sleeping'
+        const wasSleeping = this.wakeState !== 'awake'
+        this.wakeState = nextState
+        if (nextState === 'awake') {
+          if (wasSleeping) {
+            this.finalizeCurrentConversation()
+            if (!this.currentConversation || this.currentConversation.messages.length) this.createCurrentConversation()
+            this.elapsedSeconds = 0
+            this.latestUser = ''
+            this.latestAssistant = ''
+          }
+          this.status = 'listening'
+          if (!this.timer) this.startTimer()
+          return
+        }
+        this.stopTimer()
+        this.finalizeCurrentConversation()
+        this.status = 'sleeping'
       },
       startTimer() {
         this.stopTimer()
@@ -678,29 +725,36 @@
       onVoiceEvent(event) {
         if (!event || !event.type) return
         switch (event.type) {
-          case 'ready': this.status = 'listening'; this.startTimer(); break
+          case 'ready': this.applyWakeState(event.wakeState || 'sleeping'); break
+          case 'wake.state': this.applyWakeState(event.state); break
           case 'reconnecting': this.status = 'connecting'; this.errorMessage = event.message || ''; break
-          case 'speech.started': this.status = 'listening'; break
+          case 'speech.started': if (this.wakeState === 'awake') this.status = 'listening'; break
           case 'speech.stopped':
-          case 'assistant.thinking': this.status = 'thinking'; break
-          case 'assistant.speaking': this.status = 'speaking'; break
-          case 'relay.started': this.status = 'speaking'; break
-          case 'agent.planning': this.status = 'thinking'; break
+          case 'assistant.thinking': if (this.wakeState === 'awake') this.status = 'thinking'; break
+          case 'assistant.speaking': if (this.wakeState === 'awake') this.status = 'speaking'; break
+          case 'relay.started': if (this.wakeState === 'awake') this.status = 'speaking'; break
+          case 'agent.planning': if (this.wakeState === 'awake') this.status = 'thinking'; break
           case 'agent.notice':
-            if (this.isActive) this.status = 'listening'
+            if (this.wakeState === 'awake') this.status = 'listening'
             uni.showToast({ title: event.message || '该操作暂未执行', icon: 'none', duration: 3200 })
             break
-          case 'home.command.started': this.status = 'thinking'; break
-          case 'home.command.accepted': this.status = 'speaking'; break
+          case 'home.command.started':
+            if (this.wakeState === 'awake') {
+              this.status = 'thinking'
+              this.updateAssistantMessage(event.message, true, event.decisionBasis)
+            }
+            break
+          case 'home.command.accepted': if (this.wakeState === 'awake') this.status = 'speaking'; break
           case 'home.command.failed':
-            if (this.isActive) this.status = 'listening'
+            if (this.wakeState === 'awake') this.status = 'listening'
             uni.showToast({ title: event.message || '家居指令提交失败', icon: 'none', duration: 3200 })
             break
-          case 'playback.done': if (this.isActive) this.status = 'listening'; break
+          case 'playback.done': if (this.isActive) this.status = this.wakeState === 'awake' ? 'listening' : 'sleeping'; break
           case 'user.text': this.appendUserMessage(event.text); break
           case 'assistant.text': this.updateAssistantMessage(event.text, Boolean(event.final)); break
           case 'error':
             this.stopTimer()
+            this.wakeState = 'sleeping'
             this.status = 'error'
             this.errorMessage = event.message || '实时语音服务连接失败'
             this.finalizeCurrentConversation()
@@ -709,7 +763,7 @@
               setTimeout(() => uni.reLaunch({ url: '/pages/login?reason=expired' }), 500)
             }
             break
-          case 'closed': if (this.isActive) { this.stopTimer(); this.status = 'ended'; this.finalizeCurrentConversation() }; break
+          case 'closed': if (this.isActive) { this.stopTimer(); this.wakeState = 'sleeping'; this.status = 'ended'; this.finalizeCurrentConversation() }; break
         }
       }
     }

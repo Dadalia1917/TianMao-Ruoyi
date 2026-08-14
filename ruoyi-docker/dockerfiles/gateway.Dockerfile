@@ -24,7 +24,7 @@ RUN npm run build:h5
 
 FROM caddy:2-alpine
 
-COPY deploy/docker/Caddyfile /etc/caddy/Caddyfile
+COPY ruoyi-docker/config/Caddyfile /etc/caddy/Caddyfile
 COPY --from=admin-builder /build/dist /srv/admin
 COPY --from=app-builder /build/dist /srv/app
 COPY ruoyi-app/static/audio/pcm-capture-worklet.js /srv/app/static/audio/pcm-capture-worklet.js

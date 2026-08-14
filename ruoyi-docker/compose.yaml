@@ -6,10 +6,10 @@ services:
     restart: unless-stopped
     environment:
       TZ: Asia/Shanghai
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?请在 deploy/docker/.env 中配置 MYSQL_ROOT_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?请在 ruoyi-docker/.env 中配置 MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: ry-cat
       MYSQL_USER: ${MYSQL_APP_USER:-tmall_app}
-      MYSQL_PASSWORD: ${MYSQL_APP_PASSWORD:?请在 deploy/docker/.env 中配置 MYSQL_APP_PASSWORD}
+      MYSQL_PASSWORD: ${MYSQL_APP_PASSWORD:?请在 ruoyi-docker/.env 中配置 MYSQL_APP_PASSWORD}
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_0900_ai_ci
@@ -17,7 +17,7 @@ services:
       - --max-connections=${MYSQL_MAX_CONNECTIONS:-150}
     volumes:
       - mysql_data:/var/lib/mysql
-      - ./sql/ry-cat.sql:/docker-entrypoint-initdb.d/01-ry-cat.sql:ro
+      - ../sql/ry-cat.sql:/docker-entrypoint-initdb.d/01-ry-cat.sql:ro
     expose:
       - "3306"
     healthcheck:
@@ -32,7 +32,7 @@ services:
     restart: unless-stopped
     environment:
       TZ: Asia/Shanghai
-      REDIS_PASSWORD: ${REDIS_PASSWORD:?请在 deploy/docker/.env 中配置 REDIS_PASSWORD}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?请在 ruoyi-docker/.env 中配置 REDIS_PASSWORD}
     command:
       - /bin/sh
       - -c
@@ -49,8 +49,8 @@ services:
 
   java:
     build:
-      context: .
-      dockerfile: deploy/docker/java.Dockerfile
+      context: ..
+      dockerfile: ruoyi-docker/dockerfiles/java.Dockerfile
     image: tmall-smart-home/java-api:1.1.0
     restart: unless-stopped
     environment:
@@ -68,7 +68,7 @@ services:
       SPRING_DATA_REDIS_PORT: "6379"
       SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD}
       RUOYI_PROFILE: /app/data/uploadPath
-      TOKEN_SECRET: ${TOKEN_SECRET:?请在 deploy/docker/.env 中配置 TOKEN_SECRET}
+      TOKEN_SECRET: ${TOKEN_SECRET:?请在 ruoyi-docker/.env 中配置 TOKEN_SECRET}
       LOGGING_LEVEL_COM_RUOYI: ${JAVA_LOG_LEVEL:-info}
       SPRINGDOC_APIDOCS_ENABLED: "false"
       SPRINGDOC_SWAGGER_UI_ENABLED: "false"
@@ -94,13 +94,13 @@ services:
 
   fastapi:
     build:
-      context: .
-      dockerfile: deploy/docker/fastapi.Dockerfile
+      context: ..
+      dockerfile: ruoyi-docker/dockerfiles/fastapi.Dockerfile
     image: tmall-smart-home/ai-gateway:1.1.0
     restart: unless-stopped
     environment:
       TZ: Asia/Shanghai
-      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:?请在 deploy/docker/.env 中配置 DASHSCOPE_API_KEY}
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:?请在 ruoyi-docker/.env 中配置 DASHSCOPE_API_KEY}
       DASHSCOPE_REALTIME_URL: ${DASHSCOPE_REALTIME_URL:-wss://dashscope.aliyuncs.com/api-ws/v1/realtime}
       DASHSCOPE_MODEL: ${DASHSCOPE_MODEL:-qwen3.5-omni-plus-realtime}
       DASHSCOPE_VOICE: ${DASHSCOPE_VOICE:-Ethan}
@@ -118,6 +118,12 @@ services:
       AGENT_TIMEZONE: ${AGENT_TIMEZONE:-Asia/Shanghai}
       AGENT_WEATHER_ENABLED: ${AGENT_WEATHER_ENABLED:-true}
       AGENT_SIMULATED_ENVIRONMENT_ENABLED: ${AGENT_SIMULATED_ENVIRONMENT_ENABLED:-true}
+      AGENT_HOUSEHOLD_STATE_TTL_SECONDS: ${AGENT_HOUSEHOLD_STATE_TTL_SECONDS:-300}
+      AGENT_DEFAULT_ROOM: ${AGENT_DEFAULT_ROOM:-客厅}
+      AGENT_STATE_REDIS_HOST: redis
+      AGENT_STATE_REDIS_PORT: "6379"
+      AGENT_STATE_REDIS_PASSWORD: ${REDIS_PASSWORD}
+      AGENT_STATE_REDIS_DB: ${AGENT_STATE_REDIS_DB:-1}
       HOST: 0.0.0.0
       PORT: "8001"
       LOG_LEVEL: ${FASTAPI_LOG_LEVEL:-info}
@@ -170,6 +176,8 @@ services:
         condition: service_healthy
       mysql:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     command:
       - /bin/sh
       - -c
@@ -183,8 +191,8 @@ services:
 
   gateway:
     build:
-      context: .
-      dockerfile: deploy/docker/gateway.Dockerfile
+      context: ..
+      dockerfile: ruoyi-docker/dockerfiles/gateway.Dockerfile
     image: tmall-smart-home/web-gateway:1.1.0
     restart: unless-stopped
     environment:
@@ -194,7 +202,7 @@ services:
       - "${HTTPS_PORT:-443}:443"
       - "${HTTPS_PORT:-443}:443/udp"
     volumes:
-      - ./deploy/docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./config/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:

@@ -9,8 +9,8 @@
 | 产品名称 | 天猫智家·千问智能语音助手 |
 | English name | Tmall Smart Home Qwen Voice Assistant |
 | 产品版本 | **v1.1.0** |
-| 版本更新时间 | **2026 年 8 月 13 日 17:51:40（UTC+8）** |
-| 当前阶段 | v1.1.0 已覆盖安装到 T10S；回声抑制、ContentProvider、悬浮入口及真实重启链路均已完成真机验证 |
+| 版本更新时间 | **2026 年 8 月 14 日 12:00:44（UTC+8）** |
+| 当前阶段 | v1.1.0 已增加硬唤醒门控、语音退下、家庭实时状态与情境决策；T10S 控制、回声抑制、悬浮入口及真实重启链路均已完成验证 |
 | 适用终端 | 天猫智慧工控屏、Android、桌面 H5 |
 | 开发单位 | 无锡捷普迅智能科技有限公司 |
 | 基础框架 | RuoYi 3.9.2 派生工程 |
@@ -36,7 +36,7 @@
 
 ## 1. v1.1.0 更新说明
 
-版本更新时间：**2026 年 8 月 13 日 17:51:40（UTC+8）**
+版本更新时间：**2026 年 8 月 14 日 12:00:44（UTC+8）**
 
 v1.1.0 在不改变实时语音、文字对话、账号、长期记忆和运营后台既有功能的前提下，完成 T10S 本机天猫精灵 `ContentProvider` 控制链路重构，并在 FastAPI 内落地智能家居 Agent 基线。
 
@@ -47,6 +47,9 @@ v1.1.0 在不改变实时语音、文字对话、账号、长期记忆和运营�
 - Android 原生层使用 `ContentResolver.insert()` 调用 `content://com.alibaba.ailabs.genie.assistant.provider/GenieApi`，不在运行时进入终端、不执行 ADB、不要求 root 或无障碍权限。
 - 移除 `PackageManager.resolveContentProvider()` 元数据预检，直接调用已由普通第三方 UID 探针验证可用的 `GenieApi`，避免 Android 包可见性造成“预检失败、实际可调用”的误判。
 - T10S 实时语音在播放回答期间暂停麦克风上行，并在播报完成后保留扬声器尾音保护，防止 Omni 把自己的回答重新识别成下一轮用户问题。
+- 实时连接建立后默认处于“等待唤醒”，服务端 VAD/ASR 仅用于识别句首口令“天猫管家”；休眠期间的其他谈话会被丢弃并从上游上下文删除，不会触发模型回答或进入历史记录。单独呼喊只回答“我在”，口令后可直接附带问题。
+- 唤醒后进入连续对话；识别到“你可以退下了”“我不想跟你说话了”“结束对话”“先这样吧”“再见”等明确结束语时，固定简短回应后关闭本轮对话并恢复休眠。再次对话必须重新说“天猫管家”。
+- 唤醒与结束由 FastAPI 状态机决定，而不是仅靠提示词约束；百炼会话关闭自动响应，由代理在通过门控后显式创建回复，避免模型误响应环境谈话。
 - 智能家居指令会从“帮我打开天猫精灵，让天猫精灵开灯”等复合句中只提取实际设备命令“开灯”，不再把唤醒或转述前缀传给天猫精灵。
 - 服务端与 Android 原生层均执行低风险白名单校验；门锁、燃气、热水器、车库、监控、布撤防等高风险请求以及含糊、否定、询问状态类语句不会下发。
 - UI 仅反馈“已提交/提交失败”，不把 Provider 接收请求误报为设备已经执行成功。
@@ -57,18 +60,22 @@ v1.1.0 在不改变实时语音、文字对话、账号、长期记忆和运营�
 - Agent 通过 Qwen Function Calling 调用有界工具并生成严格 Pydantic 计划；只有 `execute` 状态能触发 T10S，建议、澄清、拦截、不适用或规划异常均不执行。
 - 长期记忆作为偏好参考注入 Agent，但不能作为权限授权、设备实况或安全规则；全部工具调用、证据和最终决策保留结构化日志字段，便于后续审计。
 - 当前采用“一个总控 Agent + 有界工具”，没有拆成多个互相对话的 Agent。Dify 仅作为未来知识库/非实时运营流程的可选补充，不进入实时语音主链路。
+- 新增短时“家庭状态”层和按账号/房间隔离的状态接口，可接收室温、湿度、照度、人体存在及空调等设备状态。用户说“我有点热”“屋里太暗”等隐式诉求时，Agent 会先收集室内状态、室外天气、当前时间段和长期偏好，再决定是否执行以及使用什么参数。
+- Agent 回复中附带可审计的决策依据摘要，例如“客厅 28℃、湿度 68%、室外 35℃、空调关闭、偏好 25℃”，不伪造传感器数据，也不向客户端泄露模型内部隐藏推理文本。没有真实传感器数据时，模拟值会明确标记为低可信来源。
+- 家庭实时状态默认 300 秒过期；生产 Docker 复用 Redis 7 存放短时状态，使两个 FastAPI Worker 能读取同一份家庭状态。本地未配置 Redis 时自动降级到单进程内存。
+- 本次没有新增 MySQL 表或修改持久化数据模型，不需要执行数据库升级脚本；Home Assistant 或硬件网关后续只需持续调用家庭状态接口刷新实时数据。
 - T10S 开机后不再自动打开完整助手页面。`BOOT_COMPLETED` 先拉起 1×1 透明引导 Activity，再启动前台悬浮窗服务并立即返回天猫精灵桌面；用户点击“智”悬浮球时才进入正式 APP。
 - 针对 T10S 在广播上下文中静默忽略 `startForegroundService()` 的行为增加引导 Activity；服务使用 `START_STICKY` 保活，应用失去前台时由 `onPause/onUserLeaveHint` 及时恢复悬浮入口。
 
 ### 1.2 v1.1.0 验证与产物
 
-- FastAPI 自动化测试通过：46 项（包含多类家居自然表达、高风险拦截、天气温度推荐、模拟照度推荐和用户明确参数优先）。
-- uni-app H5 生产构建通过。
+- FastAPI 自动化测试通过：65 项（包含硬唤醒匹配、休眠语句忽略、明确退下语义、隐式冷热诉求、家庭状态合并/清理、多类家居自然表达、高风险拦截、天气温度推荐、模拟照度推荐和用户明确参数优先）。
+- uni-app H5 与 App 生产构建通过。
 - Android Release 构建与 APK 签名验证通过；包名保持 `com.jpx.tmallsmarthome`，`versionCode=110`，便于覆盖升级 v1.0.0。
 - Docker Compose 配置校验通过。
 - 正式安装包：`ruoyi-app/apk/天猫智家语音助手-v1.1.0.apk`。
-- APK SHA-256：`6431E0BDB0A51185C8D026AE46A6E94CAA73800F2B6252F79D562ECD67B70BE0`。
-- 2026 年 8 月 13 日现场日志暴露的扬声器回灌、Provider 元数据预检误判和重启后悬浮窗丢失均已修复。正式 APK 已覆盖安装；真机重启日志确认引导组件在启动悬浮服务后返回天猫精灵桌面，悬浮球可见且点击后可打开 APP。
+- APK SHA-256：`652FD50436BAB5FE42A9B0F7740F34008A8E6E1B5AEE40049C4A56E7849B4D5F`。
+- 2026 年 8 月 13 日现场日志暴露的扬声器回灌、Provider 元数据预检误判和重启后悬浮窗丢失均已修复，真机重启日志确认引导组件能返回天猫精灵桌面并恢复悬浮球。2026 年 8 月 14 日加入家庭状态决策依据展示后的同版本安装包已重新构建并验签；因 T10S 当前网络 ADB 离线，最新构建暂未覆盖设备。
 
 ### 1.3 v1.0.0 历史基线
 
@@ -81,7 +88,7 @@ v1.1.0 在不改变实时语音、文字对话、账号、长期记忆和运营�
 - 完成“天猫智家”统一品牌、登录、注册、用户服务协议和隐私政策页面。
 - 登录身份在本机保留；连续 30 天未打开应用后要求重新登录。
 - 登录后进入 Qwen3.5 Omni 实时语音助手，支持自动连接、持续待命、服务端 VAD、语音打断、实时转写和语音播报。
-- 支持“天猫管家”唤醒语义；单独说出唤醒词时固定回复“姥爷，我在”。
+- 支持“天猫管家”唤醒语义；单独说出唤醒词时固定回复“我在”。
 - 增加 T10S 本机智能家居控制链路：服务端从最终语音转写中提取明确、低风险的灯、空调、窗帘等指令，经 WebSocket 结构化事件交给 Android 原生桥，再由 `ContentResolver` 调用天猫精灵导出的 `ContentProvider`。
 - 保留可配置的“外部天猫精灵声学转发”作为兼容回退，默认关闭；本机 Provider 可用时不再让 Omni 通过扬声器喊另一台设备。
 - 用户询问模型身份时如实回答当前模型身份，不用应用品牌冒充基础模型。
@@ -158,7 +165,8 @@ v1.1.0 在不改变实时语音、文字对话、账号、长期记忆和运营�
 | 运营后台 | 已实现 | Vue 3 + Java |
 | 原始录音保存 | 不实现 | 默认不落盘 |
 | 图片/附件 | 不实现 | 无 |
-| Home Assistant、设备状态闭环与复杂场景 | 后续版本 | 预留 Agent/工具层 |
+| 家庭实时状态接收与情境决策 | 已实现 | Redis 短时状态；本地可降级内存 |
+| Home Assistant 自动采集、设备执行回执与复杂场景 | 后续版本 | 复用现有状态接口和 Agent/工具层 |
 
 ---
 
@@ -517,7 +525,8 @@ sequenceDiagram
 stateDiagram-v2
     state "待命" as Idle
     state "连接中" as Connecting
-    state "在线监听" as Active
+    state "休眠监听唤醒词" as Dormant
+    state "已唤醒对话" as Active
     state "模型播报" as Speaking
     state "静音" as Muted
     state "自动重连" as Reconnecting
@@ -526,15 +535,18 @@ stateDiagram-v2
 
     [*] --> Idle
     Idle --> Connecting: 自动启动/点击开始
-    Connecting --> Active: 客户端与百炼均就绪
+    Connecting --> Dormant: 客户端与百炼均就绪
     Connecting --> Reconnecting: 网络或上游暂不可用
+    Dormant --> Dormant: 非唤醒语句丢弃
+    Dormant --> Active: 句首识别“天猫管家”
     Active --> Speaking: 收到 response.audio.delta
     Speaking --> Active: 播报完成
     Speaking --> Active: 用户开口打断
     Active --> Muted: 点击静音
     Muted --> Active: 取消静音
     Active --> Reconnecting: 连接中断
-    Reconnecting --> Active: 恢复成功
+    Active --> Dormant: 明确退下/结束语且固定回应完成
+    Reconnecting --> Dormant: 恢复成功
     Reconnecting --> Failed: 超出重试策略
     Active --> Closed: 用户结束
     Muted --> Closed: 用户结束
@@ -812,6 +824,12 @@ RuoYi/
 │  ├─ pages/common/agreement/        # 本地协议与政策
 │  └─ android-native/                # 原生 WebView、GenieBridge 与 ContentProvider 适配
 ├─ ruoyi-ui/                         # Vue 3 运营后台
+├─ ruoyi-docker/                     # Docker Compose 生产部署包
+│  ├─ compose.yaml
+│  ├─ config/
+│  ├─ dockerfiles/
+│  └─ scripts/
+├─ docs/                             # 品牌图标等正式文档资源
 └─ sql/
    ├─ ry-cat.sql
    └─ tmall-smart-home-assistant-upgrade.sql
@@ -853,6 +871,33 @@ RuoYi/
 | GET | /api/v1/memories | 查询当前账号长期记忆 |
 | DELETE | /api/v1/memories/{memory_id} | 删除当前账号单条记忆 |
 | DELETE | /api/v1/memories | 清空当前账号记忆 |
+| GET | /api/v1/agent/capabilities | 获取家庭 Agent 能力和状态时效配置 |
+| POST | /api/v1/agent/plan | 根据语句、状态与偏好生成有界执行计划 |
+| PUT | /api/v1/agent/household-state/{room} | 传感器/网关增量刷新指定房间实时状态 |
+| GET | /api/v1/agent/household-state?room=客厅 | 查询当前账号指定房间状态及新鲜度 |
+| DELETE | /api/v1/agent/household-state?room=客厅 | 清除指定房间或当前账号全部实时状态 |
+
+Home Assistant、MQTT 网关或硬件采集服务可按 30～60 秒一次的频率增量刷新状态。例如：
+
+```http
+PUT /api/v1/agent/household-state/客厅
+Authorization: Bearer <RuoYi 登录令牌>
+Content-Type: application/json
+
+{
+  "indoor_temperature_c": 28.0,
+  "indoor_humidity_percent": 68.0,
+  "indoor_illuminance_lux": 120.0,
+  "occupancy": true,
+  "device_states": {
+    "空调": { "power": false, "mode": "制冷", "temperature_c": 25 },
+    "主灯": { "power": true, "brightness_percent": 35 }
+  },
+  "source": "home-assistant"
+}
+```
+
+接口支持增量更新：温湿度传感器和设备网关可以分别写入，服务端会合并成同一房间快照。超过 TTL 未刷新后状态会标记为过期，Agent 不会继续把旧值当成实时事实。家居决策的最终回复下方会显示“本次参考”卡片，保存室温、湿度、天气、设备状态、时间段和偏好等可审计依据。
 
 消费者端不直接连接阿里云百炼，也不能读取服务端 API Key。
 
@@ -942,6 +987,18 @@ npm run dev
 
 Android 原生容器在可信的 `file:///android_asset/` 页面注册 `GenieBridge`。桥接调用链是 `sendToGenie()` → `ContentResolver.insert()`，并在原生层再次校验低风险设备和操作。不要把开发调试用的 `adb shell content insert` 拼进 App，也不要申请 root 或 Shell 权限。
 
+### 13.9 Docker Compose 一体化部署
+
+生产容器相关文件已集中到 `ruoyi-docker`，不再散落在工程根目录和旧部署目录。首次部署时复制环境变量模板并运行统一脚本：
+
+```bash
+cp ruoyi-docker/.env.example ruoyi-docker/.env
+vi ruoyi-docker/.env
+sh ruoyi-docker/scripts/deploy.sh
+```
+
+编排包含 MySQL、Redis、Java API、FastAPI AI 网关和 Caddy Web 网关。详细目录、手动管理与安全说明见 [`ruoyi-docker/README.md`](ruoyi-docker/README.md)。工程根目录的 `.dockerignore` 是整个构建上下文的排除规则，仍需保留。
+
 ---
 
 ## 14. 配置说明
@@ -978,6 +1035,9 @@ Android 原生容器在可信的 `file:///android_asset/` 页面注册 `GenieBri
 | VOICE_STORE_TRANSCRIPTS | 服务端保存转写 | false |
 | MEMORY_ENABLED | 跨会话记忆 | true |
 | TEXT_CHAT_ENABLED | 文字对话 | true |
+| AGENT_HOUSEHOLD_STATE_TTL_SECONDS | 家庭实时状态有效期 | 300 秒 |
+| AGENT_DEFAULT_ROOM | 隐式舒适诉求默认房间 | 客厅 |
+| AGENT_STATE_REDIS_HOST / PORT / PASSWORD / DB | 多 Worker 共享家庭状态 | Docker 使用 redis:6379、DB 1；本地留空则使用内存 |
 
 ### 14.3 Android 拉起
 
@@ -1000,6 +1060,7 @@ smartbutler://voice
 - Java 认证结果支持短时缓存，但 Token 的权威来源仍是 RuoYi。
 - FastAPI 不依赖 Java 内部类；只通过 <code>/getInfo</code> 和共享的数据模型边界协作。
 - Agent 已作为独立编排层接入，设备协议仍留在 Android 原生桥；Home Assistant 后续以工具适配器接入，不把设备协议写进音频代理核心。
+- 温湿度、照度、占用和设备状态存放在带 TTL 的 Redis 短时状态中，不写入对话历史；多 Worker 读取一致，过期值不会作为实时事实参与决策。
 
 生产扩容建议：
 
@@ -1065,6 +1126,8 @@ npm run build:prod
 - [ ] T10S 主应用握手声明 `genie_provider=true`，明确的灯/空调低风险指令能提交给 GenieApi。
 - [ ] H5 与普通 Android 设备不声明 Provider 能力，不收到本机控制事件。
 - [ ] 含糊指令以及门锁、燃气、安防等高风险指令被拒绝，界面不谎报设备已完成操作。
+- [ ] 向家庭状态接口写入客厅温湿度、照度和空调状态后，说“我有点热”会引用这些状态、室外天气、时间段与账号偏好，再给出并提交适宜参数。
+- [ ] 停止刷新超过 TTL 后，Agent 不再把旧状态描述为实时传感器事实。
 
 ---
 
@@ -1080,7 +1143,7 @@ npm run build:prod
 ### v1.2.x：Agent 与智能家居深化
 
 - 在现有 LangGraph 单总控与 Function Calling 基线上接入 Home Assistant 工具适配器。
-- 增加真实室内照度、温湿度、人体存在等传感器数据，替换当前模拟环境值。
+- 让 Home Assistant/硬件网关持续推送真实室内照度、温湿度、人体存在和设备状态，替换未接硬件环境下的模拟兜底值。
 - 增加设备状态查询、执行结果闭环、幂等键、分级确认和复杂自动化场景。
 - 评估将 Dify 用于知识库与非实时运营流程，但保持实时语音控制主链路独立。
 

@@ -8,7 +8,9 @@ from assistant_server.realtime import (
     ConnectionLimiter,
     build_session_update,
     classify_upstream_connection_error,
+    extract_wake_request,
     extract_home_control_command,
+    is_conversation_exit,
     should_start_acoustic_relay,
 )
 
@@ -22,14 +24,70 @@ def test_session_is_pure_realtime_voice(monkeypatch):
     assert session["output_audio_format"] == "pcm16"
     assert session["turn_detection"]["type"] == "semantic_vad"
     assert session["turn_detection"]["threshold"] == 0.35
+    assert session["turn_detection"]["create_response"] is False
+    assert session["turn_detection"]["interrupt_response"] is True
     assert "tools" not in session
+
+
+@pytest.mark.parametrize(
+    ("transcript", "expected_request"),
+    (
+        ("天猫管家", ""),
+        ("天猫 管家。", ""),
+        ("你好，天猫管家，今天天气怎么样", "今天天气怎么样"),
+        ("天猫管家帮我打开空调", "帮我打开空调"),
+    ),
+)
+def test_wake_phrase_opens_the_conversation_gate(transcript, expected_request):
+    assert extract_wake_request(transcript) == (True, expected_request)
+
+
+@pytest.mark.parametrize(
+    "transcript",
+    (
+        "我刚才提到了天猫管家",
+        "这个天猫管家挺好用",
+        "请介绍一下天猫管家",
+        "普通聊天不会唤醒",
+    ),
+)
+def test_dormant_gate_ignores_non_addressed_speech(transcript):
+    assert extract_wake_request(transcript) == (False, "")
+
+
+@pytest.mark.parametrize(
+    "transcript",
+    (
+        "你可以退下了",
+        "我不想跟你说话了",
+        "结束对话",
+        "谢谢，先这样吧",
+        "拜拜",
+    ),
+)
+def test_explicit_exit_phrases_close_the_current_dialogue(transcript):
+    assert is_conversation_exit(transcript)
+
+
+@pytest.mark.parametrize(
+    "transcript",
+    (
+        "不用开空调了",
+        "不要关闭对话记录",
+        "我没事先问问你空调怎么设置",
+        "再见这个词是什么意思",
+    ),
+)
+def test_unrelated_negative_phrases_do_not_close_the_dialogue(transcript):
+    assert not is_conversation_exit(transcript)
 
 
 def test_wake_phrase_has_a_short_fixed_acknowledgement():
     instructions = build_session_update(Settings.from_env())["session"]["instructions"]
 
     assert "天猫管家" in instructions
-    assert "姥爷，我在" in instructions
+    assert "只回答“我在”" in instructions
+    assert "姥爷，我在" not in instructions
     assert "曼巴管家" in instructions
     assert "Qwen3.5 Omni" in instructions
     assert "不要模仿任何现实人物的声纹" in instructions

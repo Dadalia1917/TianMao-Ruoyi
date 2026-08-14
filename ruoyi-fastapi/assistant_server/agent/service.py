@@ -21,10 +21,13 @@ from .schemas import (
     DecisionStatus,
     DeviceAction,
     Evidence,
+    HouseholdStateSnapshot,
+    HouseholdStateUpdate,
     ModelPlan,
     RiskLevel,
 )
 from .tools import HouseholdDataTools
+from .state import HouseholdStateStore
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +74,13 @@ _ACTION_WORDS = (
     "升高", "降低", "调高", "调低", "调亮", "调暗", "调大", "调小", "提高", "减小",
     "切换", "拉开", "拉上", "合上", "清扫", "扫地", "回充", "开", "关",
 )
+_COMFORT_PATTERNS: tuple[tuple[str, tuple[str, ...], str], ...] = (
+    ("hot", ("有点热", "好热", "太热", "很热", "闷热", "有点闷", "热死了"), "空调"),
+    ("cold", ("有点冷", "好冷", "太冷", "很冷", "冻死了"), "空调"),
+    ("dark", ("有点暗", "太暗", "好暗", "看不清", "屋里黑", "房间黑"), "灯"),
+    ("humid", ("有点潮", "太潮", "好潮", "湿气重", "太湿了"), "除湿机"),
+    ("dry", ("有点干", "太干", "好干", "空气干燥"), "加湿器"),
+)
 
 
 class AgentState(TypedDict, total=False):
@@ -86,6 +96,7 @@ class AgentState(TypedDict, total=False):
     evidence: list[Evidence]
     model_plan: ModelPlan
     used_function_calling: bool
+    comfort_intent: str
     decision: AgentDecision
 
 
@@ -98,6 +109,13 @@ class HouseholdAgentService:
         self.ready = False
         self._client: httpx.AsyncClient | None = None
         self._data_tools: HouseholdDataTools | None = None
+        self._state_store = HouseholdStateStore(
+            ttl_seconds=settings.agent_household_state_ttl_seconds,
+            redis_host=settings.agent_state_redis_host,
+            redis_port=settings.agent_state_redis_port,
+            redis_password=settings.agent_state_redis_password,
+            redis_db=settings.agent_state_redis_db,
+        )
         graph = StateGraph(AgentState)
         graph.add_node("analyze", self._analyze)
         graph.add_node("blocked", self._blocked)
@@ -130,6 +148,7 @@ class HouseholdAgentService:
         if not self.enabled:
             logger.info("household agent disabled")
             return
+        await self._state_store.start()
         self._client = httpx.AsyncClient(
             headers={"Authorization": f"Bearer {self.settings.dashscope_api_key}"},
             limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
@@ -144,25 +163,32 @@ class HouseholdAgentService:
             simulated_environment_enabled=(
                 self.settings.agent_simulated_environment_enabled
             ),
+            state_store=self._state_store,
         )
         self.ready = bool(self.settings.dashscope_api_key)
         logger.info(
-            "household agent ready: model=%s location=%s weather=%s simulated_environment=%s",
+            "household agent ready: model=%s location=%s weather=%s simulated_environment=%s state_backend=%s",
             self.settings.agent_model,
             self.settings.agent_location_name,
             self.settings.agent_weather_enabled,
             self.settings.agent_simulated_environment_enabled,
+            self._state_store.backend,
         )
 
     async def close(self) -> None:
         self.ready = False
         if self._client:
             await self._client.aclose()
+        await self._state_store.close()
         self._client = None
         self._data_tools = None
 
     def might_be_home_request(self, transcript: str) -> bool:
         text = "".join(str(transcript or "").split())
+        if self._comfort_intent(text):
+            if any(marker in text for marker in _NEGATIONS):
+                return False
+            return not any(marker in text for marker in _DISCUSSION)
         has_device = any(alias in text for alias, _ in _DEVICE_ALIASES) or any(
             marker in text for marker in _UNSAFE
         )
@@ -172,6 +198,19 @@ class HouseholdAgentService:
         if any(marker in text for marker in _NEGATIONS):
             return False
         return not any(marker in text for marker in _DISCUSSION)
+
+    async def update_household_state(
+        self, user_id: str, room: str, update: HouseholdStateUpdate
+    ) -> HouseholdStateSnapshot:
+        return await self._state_store.update(user_id, room, update)
+
+    async def get_household_state(
+        self, user_id: str, room: str
+    ) -> HouseholdStateSnapshot | None:
+        return await self._state_store.get(user_id, room)
+
+    async def clear_household_state(self, user_id: str, room: str | None = None) -> int:
+        return await self._state_store.clear(user_id, room)
 
     async def plan(self, request: AgentRequest) -> AgentDecision:
         result = await self._graph.ainvoke(
@@ -206,6 +245,9 @@ class HouseholdAgentService:
             status=status,
             user_message=user_message,
             rationale=rationale,
+            decision_basis=[
+                f"{item.kind}：{item.summary}" for item in state.get("evidence", [])
+            ][:12],
             action=action,
             evidence=state.get("evidence", []),
             used_function_calling=state.get("used_function_calling", False),
@@ -216,6 +258,26 @@ class HouseholdAgentService:
         text = "".join(state["request"].transcript.split())
         if any(marker in text for marker in _UNSAFE):
             return {"route": "blocked", "risk_level": RiskLevel.L4}
+        comfort_intent = self._comfort_intent(text)
+        if comfort_intent:
+            device = next(
+                device
+                for name, _markers, device in _COMFORT_PATTERNS
+                if name == comfort_intent
+            )
+            room = next(
+                (name for name in _ROOMS if name in text),
+                self.settings.agent_default_room,
+            )
+            return {
+                "route": "contextual",
+                "device": device,
+                "room": room,
+                "action": "set" if device in {"空调", "灯"} else "open",
+                "risk_level": RiskLevel.L2 if device == "空调" else RiskLevel.L1,
+                "needs_context": True,
+                "comfort_intent": comfort_intent,
+            }
         device = next((canonical for alias, canonical in _DEVICE_ALIASES if alias in text), "")
         if not device or not self.might_be_home_request(text):
             return {"route": "not_applicable", "device": device}
@@ -243,6 +305,13 @@ class HouseholdAgentService:
             "risk_level": RiskLevel.L2 if device == "空调" else RiskLevel.L1,
             "needs_context": needs_context,
         }
+
+    @staticmethod
+    def _comfort_intent(text: str) -> str:
+        for name, markers, _device in _COMFORT_PATTERNS:
+            if any(marker in text for marker in markers):
+                return name
+        return ""
 
     def _blocked(self, state: AgentState) -> dict[str, Any]:
         return {
@@ -348,7 +417,31 @@ class HouseholdAgentService:
                         item = await self._data_tools.get_environment()
                         evidence = self._replace_evidence(evidence, item)
                         output = item.model_dump(mode="json")
+                    elif name == "get_household_state":
+                        item = await self._data_tools.get_household_state(
+                            user_id=state["request"].user_id,
+                            room=state.get("room") or self.settings.agent_default_room,
+                            memory_context=state["request"].memory_context,
+                        )
+                        evidence = self._replace_evidence(evidence, item)
+                        output = item.model_dump(mode="json")
                     elif name == "submit_home_plan":
+                        missing = self._missing_required_evidence(state, evidence)
+                        if missing:
+                            output = {
+                                "error": "missing_required_evidence",
+                                "required": missing,
+                                "message": "请先调用缺失的家庭状态工具，再提交计划。",
+                            }
+                            messages.append(
+                                {
+                                    "role": "tool",
+                                    "tool_call_id": tool_call.get("id", ""),
+                                    "name": name,
+                                    "content": json.dumps(output, ensure_ascii=False),
+                                }
+                            )
+                            continue
                         plan = ModelPlan.model_validate(arguments)
                         return {
                             "model_plan": plan,
@@ -417,7 +510,11 @@ class HouseholdAgentService:
             "decision": self._base_decision(
                 state,
                 status=DecisionStatus.EXECUTE,
-                user_message=plan.user_message,
+                user_message=(
+                    self._contextual_user_message(state, state.get("evidence", []), parameters)
+                    if state.get("needs_context")
+                    else plan.user_message
+                ),
                 rationale=plan.rationale,
                 action=action,
             )
@@ -432,28 +529,45 @@ class HouseholdAgentService:
         rationale = "按用户明确要求执行。"
         if state["device"] == "空调" and "temperature_c" not in params:
             weather = next((item for item in evidence if item.kind == "weather"), None)
+            household = next(
+                (item for item in evidence if item.kind == "household_state"), None
+            )
             outside = weather.data.get("temperature_c") if weather else None
-            temperature = self._recommended_ac_temperature(outside)
+            indoor = household.data.get("indoor_temperature_c") if household else None
+            preferred = household.data.get("preferred_temperature_c") if household else None
+            temperature = self._recommended_ac_temperature(
+                outside,
+                indoor=indoor,
+                preferred=preferred,
+                comfort_intent=state.get("comfort_intent", ""),
+            )
             params["temperature_c"] = temperature
-            rationale = (
-                f"结合当前天气建议设置为{temperature}℃。"
-                if isinstance(outside, (int, float))
-                else f"天气数据暂不可用，按节能保守值设置为{temperature}℃。"
+            rationale = self._air_conditioner_rationale(
+                state, weather, household, temperature
             )
         if state["device"] == "灯" and "brightness_percent" not in params:
+            household = next(
+                (item for item in evidence if item.kind == "household_state"), None
+            )
             environment = next((item for item in evidence if item.kind == "environment"), None)
-            lux = environment.data.get("illuminance_lux") if environment else None
+            lux = (
+                household.data.get("illuminance_lux")
+                if household
+                else environment.data.get("illuminance_lux") if environment else None
+            )
             brightness = self._recommended_brightness(lux)
             params["brightness_percent"] = brightness
-            rationale = f"根据明确标记为模拟的环境照度，建议亮度为{brightness}%。"
+            source = "实时室内照度" if household and not household.simulated else "模拟室内照度"
+            rationale = f"根据{source}，建议亮度为{brightness}%。"
         command = self._command_from_parts(state, params, room_device)
+        user_message = self._contextual_user_message(state, evidence, params)
         return {
             "model_plan": ModelPlan(
                 command=command,
                 device=state["device"],
                 room=state.get("room", ""),
                 action=state["action"],
-                user_message="好的，将按建议参数为您处理。",
+                user_message=user_message,
                 rationale=rationale,
                 parameters=params,
             ),
@@ -524,18 +638,37 @@ class HouseholdAgentService:
             result.pop("brightness_percent", None)
         return result
 
-    def _recommended_ac_temperature(self, outside: Any) -> int:
-        if not isinstance(outside, (int, float)):
-            return 26
-        if outside >= 34:
-            return 27
-        if outside >= 28:
-            return 26
-        if outside <= 8:
-            return 22
-        if outside <= 16:
-            return 23
-        return 25
+    def _recommended_ac_temperature(
+        self,
+        outside: Any,
+        *,
+        indoor: Any = None,
+        preferred: Any = None,
+        comfort_intent: str = "",
+    ) -> int:
+        if isinstance(preferred, (int, float)):
+            base = int(preferred)
+        elif comfort_intent == "hot":
+            base = 25
+        elif comfort_intent == "cold":
+            base = 23
+        elif not isinstance(outside, (int, float)):
+            base = 26
+        elif outside >= 34:
+            base = 27
+        elif outside >= 28:
+            base = 26
+        elif outside <= 8:
+            base = 22
+        elif outside <= 16:
+            base = 23
+        else:
+            base = 25
+        if comfort_intent == "hot" and isinstance(indoor, (int, float)):
+            base = min(base, max(24, int(round(float(indoor) - 2))))
+        if comfort_intent == "cold" and isinstance(indoor, (int, float)):
+            base = max(base, min(25, int(round(float(indoor) + 2))))
+        return max(16, min(30, base))
 
     def _recommended_brightness(self, lux: Any) -> int:
         if not isinstance(lux, (int, float)):
@@ -547,6 +680,81 @@ class HouseholdAgentService:
         if lux < 500:
             return 45
         return 30
+
+    def _air_conditioner_rationale(
+        self,
+        state: AgentState,
+        weather: Evidence | None,
+        household: Evidence | None,
+        temperature: int,
+    ) -> str:
+        facts: list[str] = []
+        if household:
+            indoor = household.data.get("indoor_temperature_c")
+            humidity = household.data.get("indoor_humidity_percent")
+            period = household.data.get("time_period")
+            preferred = household.data.get("preferred_temperature_c")
+            if isinstance(indoor, (int, float)):
+                facts.append(f"室内{float(indoor):.1f}℃")
+            if isinstance(humidity, (int, float)):
+                facts.append(f"湿度{float(humidity):.0f}%")
+            if period:
+                facts.append(str(period))
+            if isinstance(preferred, (int, float)):
+                facts.append(f"偏好{int(preferred)}℃")
+        if weather:
+            outside = weather.data.get("temperature_c")
+            if isinstance(outside, (int, float)):
+                facts.append(f"室外{float(outside):.1f}℃")
+        return f"综合{'、'.join(facts) or '当前可用家庭状态'}，建议设置为{temperature}℃。"
+
+    def _contextual_user_message(
+        self,
+        state: AgentState,
+        evidence: list[Evidence],
+        params: dict[str, Any],
+    ) -> str:
+        room = state.get("room") or self.settings.agent_default_room
+        household = next(
+            (item for item in evidence if item.kind == "household_state"), None
+        )
+        weather = next((item for item in evidence if item.kind == "weather"), None)
+        if state.get("device") == "空调":
+            target = params.get("temperature_c")
+            indoor = household.data.get("indoor_temperature_c") if household else None
+            humidity = household.data.get("indoor_humidity_percent") if household else None
+            devices = household.data.get("device_states", {}) if household else {}
+            ac_state = devices.get("空调", {}) if isinstance(devices, dict) else {}
+            power = ac_state.get("power") if isinstance(ac_state, dict) else "unknown"
+            parts: list[str] = []
+            if isinstance(indoor, (int, float)):
+                label = "当前" if household and not household.simulated else "估算"
+                parts.append(f"{room}{label}{float(indoor):.1f}℃")
+            if isinstance(humidity, (int, float)):
+                parts.append(f"湿度{float(humidity):.0f}%")
+            outside = weather.data.get("temperature_c") if weather else None
+            if isinstance(outside, (int, float)):
+                parts.append(f"室外{float(outside):.1f}℃")
+            prefix = "，".join(parts)
+            if power is True or str(power).lower() in {"on", "true", "1", "开启"}:
+                action = f"空调已经开启，我将把它调整为{target}℃"
+            else:
+                action = f"我将为您打开空调并设置为{target}℃"
+            return f"{prefix}；{action}。" if prefix else f"{action}。"
+        if state.get("device") == "灯":
+            lux = household.data.get("illuminance_lux") if household else None
+            brightness = params.get("brightness_percent")
+            prefix = (
+                f"{room}{'当前' if household and not household.simulated else '估算'}照度约{float(lux):.0f} lx，"
+                if isinstance(lux, (int, float))
+                else ""
+            )
+            return f"{prefix}我将把灯光调整为{brightness}%亮度。"
+        if state.get("comfort_intent") == "humid":
+            return f"{room}湿度偏高，我将为您开启除湿机。"
+        if state.get("comfort_intent") == "dry":
+            return f"{room}空气偏干，我将为您开启加湿器。"
+        return "已结合当前家庭状态生成控制方案，准备为您处理。"
 
     def _normalize_command(self, transcript: str) -> str:
         command = "".join(str(transcript or "").split())
@@ -578,11 +786,33 @@ class HouseholdAgentService:
             evidence = self._replace_evidence(
                 evidence, await self._data_tools.get_weather()
             )
+            kinds.add("weather")
+        if state.get("needs_context") and "household_state" not in kinds:
+            evidence = self._replace_evidence(
+                evidence,
+                await self._data_tools.get_household_state(
+                    user_id=state["request"].user_id,
+                    room=state.get("room") or self.settings.agent_default_room,
+                    memory_context=state["request"].memory_context,
+                ),
+            )
+            kinds.add("household_state")
         if state.get("device") == "灯" and "environment" not in kinds:
             evidence = self._replace_evidence(
                 evidence, await self._data_tools.get_environment()
             )
         return evidence
+
+    def _missing_required_evidence(
+        self, state: AgentState, evidence: list[Evidence]
+    ) -> list[str]:
+        kinds = {item.kind for item in evidence}
+        required = {"household_state"} if state.get("needs_context") else set()
+        if state.get("device") == "空调":
+            required.add("weather")
+        if state.get("device") == "灯":
+            required.add("environment")
+        return sorted(required - kinds)
 
     def _json_object(self, raw: Any) -> dict[str, Any]:
         if isinstance(raw, dict):
@@ -609,6 +839,14 @@ class HouseholdAgentService:
                 "function": {
                     "name": "get_environment",
                     "description": "读取当前室内环境模拟值；结果会明确标记为模拟，不能当成传感器实测。",
+                    "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_household_state",
+                    "description": "读取指定房间的实时室温、湿度、照度、占用状态、设备状态、当前时间段和账号温度偏好；缺少传感器时会逐字段标记模拟来源。",
                     "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
                 },
             },

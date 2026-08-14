@@ -14,7 +14,11 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from starlette.websockets import WebSocketDisconnect
 
 from assistant_server.auth import AuthenticationError, RuoYiAuthenticator
-from assistant_server.agent import AgentRequest, HouseholdAgentService
+from assistant_server.agent import (
+    AgentRequest,
+    HouseholdAgentService,
+    HouseholdStateUpdate,
+)
 from assistant_server.config import Settings, load_local_env
 from assistant_server.history import VoiceHistoryStore
 from assistant_server.memory import MemoryManager
@@ -102,7 +106,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=list(settings.allowed_origins),
     allow_credentials=settings.allowed_origins != ("*",),
-    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
 )
 
@@ -242,9 +246,12 @@ async def agent_capabilities(request: Request) -> dict[str, Any]:
         "context_tools": {
             "weather": settings.agent_weather_enabled,
             "simulated_environment": settings.agent_simulated_environment_enabled,
+            "live_household_state": True,
         },
+        "household_state_ttl_seconds": settings.agent_household_state_ttl_seconds,
+        "default_room": settings.agent_default_room,
         "execution_channel": "android_genie_content_provider",
-        "policy_version": "household-agent-1.0",
+        "policy_version": "household-agent-1.1",
     }
 
 
@@ -256,6 +263,42 @@ async def plan_home_action(payload: AgentRequest, request: Request) -> dict[str,
     )
     request.app.state.metrics.inc(f"agent_{decision.status.value}_total")
     return decision.model_dump(mode="json")
+
+
+@app.put("/api/v1/agent/household-state/{room}")
+async def update_household_state(
+    room: str, payload: HouseholdStateUpdate, request: Request
+) -> dict[str, Any]:
+    user_id = await _authenticated_user(request)
+    snapshot = await request.app.state.agent.update_household_state(
+        user_id, room, payload
+    )
+    return snapshot.model_dump(mode="json")
+
+
+@app.get("/api/v1/agent/household-state")
+async def get_household_state(
+    request: Request, room: str = settings.agent_default_room
+) -> dict[str, Any]:
+    user_id = await _authenticated_user(request)
+    snapshot = await request.app.state.agent.get_household_state(user_id, room)
+    if snapshot is None:
+        return {
+            "room": room,
+            "fresh": False,
+            "available": False,
+            "message": "尚未收到该房间的实时家庭状态；Agent 将使用明确标记的模拟值。",
+        }
+    return {"available": True, **snapshot.model_dump(mode="json")}
+
+
+@app.delete("/api/v1/agent/household-state")
+async def clear_household_state(
+    request: Request, room: str | None = None
+) -> dict[str, Any]:
+    user_id = await _authenticated_user(request)
+    deleted = await request.app.state.agent.clear_household_state(user_id, room)
+    return {"deleted": deleted}
 
 
 @app.websocket("/ws/v1/assistant")

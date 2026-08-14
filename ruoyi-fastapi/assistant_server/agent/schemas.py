@@ -75,11 +75,43 @@ class AgentDecision(BaseModel):
     status: DecisionStatus
     user_message: str = Field(max_length=500)
     rationale: str = Field(default="", max_length=1000)
+    decision_basis: list[str] = Field(default_factory=list, max_length=12)
     action: DeviceAction | None = None
     evidence: list[Evidence] = Field(default_factory=list)
     used_function_calling: bool = False
-    policy_version: str = "household-agent-1.0"
+    policy_version: str = "household-agent-1.1"
     created_at: datetime
+
+
+class HouseholdStateUpdate(BaseModel):
+    """Partial live state reported by Home Assistant, sensors or the Android client."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    indoor_temperature_c: float | None = Field(default=None, ge=-20, le=60)
+    indoor_humidity_percent: float | None = Field(default=None, ge=0, le=100)
+    illuminance_lux: float | None = Field(default=None, ge=0, le=500_000)
+    occupancy: bool | None = None
+    device_states: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    source: str = Field(default="sensor_gateway", min_length=1, max_length=80)
+    observed_at: datetime | None = None
+
+
+class HouseholdStateSnapshot(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    user_id: str
+    room: str
+    indoor_temperature_c: float | None = None
+    indoor_humidity_percent: float | None = None
+    illuminance_lux: float | None = None
+    occupancy: bool | None = None
+    device_states: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    source: str
+    observed_at: datetime
+    received_at: datetime
+    fresh: bool
+    expires_in_seconds: int
 
 
 class ModelPlan(BaseModel):
