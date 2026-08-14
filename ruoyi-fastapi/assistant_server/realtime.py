@@ -9,6 +9,7 @@ import uuid
 from collections import Counter, defaultdict
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from difflib import SequenceMatcher
 from typing import Any
 
 from fastapi import WebSocket
@@ -36,7 +37,9 @@ ASSISTANT_INSTRUCTIONS = """请使用自然、简洁、温暖的中文回答，�
 WAKE_PHRASE = "管家"
 WAKE_REPLY = "我在，有什么需要？"
 EXIT_REPLY = "好的，需要时再叫我。"
-EXECUTE_REPLY = "好的，正在执行。"
+SUBMIT_SUCCESS_REPLY = "指令已提交给天猫精灵，请以设备实际状态为准。"
+SUBMIT_FAILED_REPLY = "家居指令没有提交成功，请稍后再试。"
+SUBMIT_TIMEOUT_REPLY = "没有收到设备端的提交结果，本次不能确认已经提交，请稍后再试。"
 CANCEL_REPLY = "好的，已取消，需要时再叫我。"
 CONFIRM_REPLY = "请回答“执行”或“取消”。"
 _WAKE_PREFIX_RE = re.compile(
@@ -120,12 +123,38 @@ def classify_home_confirmation(transcript: str) -> str:
     return ""
 
 
+def classify_home_command_result(status: str) -> tuple[str, str]:
+    """Map the native bridge receipt to a truthful server/user outcome."""
+    normalized = str(status or "").strip().lower()
+    if normalized == "accepted_unverified":
+        return "submitted", SUBMIT_SUCCESS_REPLY
+    return "failed", SUBMIT_FAILED_REPLY
+
+
+def is_probable_assistant_echo(transcript: str, assistant_text: str) -> bool:
+    """Detect a sufficiently long transcript that repeats the latest TTS text."""
+    candidate = re.sub(r"[\W_]+", "", str(transcript or "")).casefold()
+    reference = re.sub(r"[\W_]+", "", str(assistant_text or "")).casefold()
+    if len(candidate) < 6 or len(reference) < 6:
+        return False
+    if candidate == reference or candidate in reference or reference in candidate:
+        return True
+    return SequenceMatcher(None, candidate, reference, autojunk=False).ratio() >= 0.86
+
+
+def _safe_nonnegative_int(value: Any) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
 GENIE_PROVIDER_INSTRUCTIONS = """
 
-当前客户端已接入天猫精灵智慧屏的本机智能家居指令通道。服务端会独立识别低风险控制请求和“我有点热/冷/暗/闷/干”等隐式舒适度诉求，再由家庭 Agent 查询家庭状态、天气、时间和用户偏好后决定是否提交给天猫精灵：
+当前客户端已接入天猫精灵智慧屏的本机智能家居指令通道。服务端会独立识别低风险控制请求，以及冷热、明暗、干湿、通风、空气质量、疲劳、困倦、压力等生活状态，再由家庭 Agent 查询家庭状态、天气、时间和用户偏好后给出建议或决定是否提交给天猫精灵。疲劳、压力和想放松默认只建议休息、补水并可选播放舒缓音乐，不能推断成开启空调：
 1. 对明确控制请求或隐式舒适度诉求，不要抢先回答；家庭 Agent 会查询家庭状态，并把有依据的事实、建议和确认问题完整朗读出来。
 2. 不要重复唤醒词，不要朗读完整设备命令，不要说自己进入了终端、执行了 ADB 或调用了内部接口。
-3. 必须先征得用户明确同意，服务端才会提交指令。不得声称设备已经执行成功，也不得跳过确认。
+3. 必须先征得用户明确同意，服务端才会提交指令；随后还必须等待 T10S 原生桥的真实提交回执。不得声称设备已经执行成功，也不得跳过确认或伪造成功。
 4. 对含糊操作先询问最终状态；门锁、燃气、热水器、车库门、监控撤防和报警器等敏感操作不支持，应明确说明不能执行。
 5. 本段明确说明通道可用；不得回答“无法控制”“请手动操作”或建议用户再去呼喊天猫精灵。
 """
@@ -151,6 +180,10 @@ ACOUSTIC_RELAY_INSTRUCTIONS = """
 
 
 _RELAY_ACTION_MARKERS = (
+    "播放",
+    "来一首",
+    "放一首",
+    "听",
     "打开",
     "开启",
     "关掉",
@@ -188,6 +221,10 @@ _RELAY_ACTION_MARKERS = (
     "关",
 )
 _RELAY_DEVICE_MARKERS = (
+    "音乐播放器",
+    "轻音乐",
+    "音乐",
+    "歌曲",
     "灯",
     "照明",
     "空调",
@@ -351,15 +388,16 @@ def build_session_update(
         "session": {
             "modalities": ["text", "audio"],
             "voice": settings.dashscope_voice,
-            "input_audio_format": "pcm16",
-            "output_audio_format": "pcm16",
+            "input_audio_format": "pcm",
+            "output_audio_format": "pcm",
             "instructions": instructions,
             "turn_detection": {
                 "type": "semantic_vad",
-                # 0.1 在智慧屏的远场麦克风上会把扬声器尾音与环境声频繁判成新一轮。
-                "threshold": 0.35,
-                "prefix_padding_ms": 400,
-                "silence_duration_ms": 700,
+                # T10S 远场环境采用官方建议的中等语义阈值，并给句首和句尾
+                # 留足缓冲，降低扬声器尾音误触发和短句被截断的概率。
+                "threshold": settings.realtime_vad_threshold,
+                "prefix_padding_ms": settings.realtime_vad_prefix_padding_ms,
+                "silence_duration_ms": settings.realtime_vad_silence_duration_ms,
                 # VAD/ASR remains online while dormant, but only this proxy is
                 # allowed to create a model response after the wake gate opens.
                 "create_response": False,
@@ -387,6 +425,11 @@ class WakeConversationState:
     conversation_item_ids: set[str] = field(default_factory=set)
     pending_home_action: PendingHomeAction | None = None
     home_plan_in_progress: bool = False
+    pending_home_execution_id: str = ""
+    home_result_timeout_task: asyncio.Task[None] | None = None
+    client_playback_active: bool = False
+    client_playback_completed_at: float = 0.0
+    last_assistant_transcript: str = ""
 
 
 @dataclass(slots=True)
@@ -652,7 +695,14 @@ class RealtimeProxy:
                 wake_state = WakeConversationState()
                 writer_task = asyncio.create_task(writer.run(), name=f"writer-{client_id}")
                 client_task = asyncio.create_task(
-                    self._client_to_upstream(websocket, upstream, stats, user_id),
+                    self._client_to_upstream(
+                        websocket,
+                        upstream,
+                        writer,
+                        stats,
+                        user_id,
+                        wake_state,
+                    ),
                     name=f"client-in-{client_id}",
                 )
                 upstream_task = asyncio.create_task(
@@ -683,6 +733,7 @@ class RealtimeProxy:
                 except TimeoutError:
                     rotate = True
                 finally:
+                    self._clear_pending_home_result(wake_state)
                     for task in tasks:
                         task.cancel()
                     await asyncio.gather(*tasks, return_exceptions=True)
@@ -805,8 +856,10 @@ class RealtimeProxy:
         self,
         websocket: WebSocket,
         upstream: ClientConnection,
+        writer: ClientWriter,
         stats: VoiceSessionStats,
         user_id: str,
+        wake_state: WakeConversationState,
     ) -> None:
         allowed = {
             "input_audio_buffer.append",
@@ -832,6 +885,41 @@ class RealtimeProxy:
             event_type = event.get("type")
             if event_type == "ping":
                 continue
+            if event_type == "client.playback.started":
+                wake_state.client_playback_active = True
+                wake_state.client_playback_completed_at = 0.0
+                self.metrics.inc("client_playback_started_total")
+                continue
+            if event_type == "client.playback.done":
+                wake_state.client_playback_active = False
+                wake_state.client_playback_completed_at = time.monotonic()
+                self.metrics.inc("client_playback_done_total")
+                continue
+            if event_type == "client.audio_diagnostics":
+                processor = str(event.get("processor") or "unknown")
+                if processor not in {"audio_worklet", "script_processor"}:
+                    processor = "unknown"
+                dropped_frames = _safe_nonnegative_int(event.get("dropped_frames"))
+                self.metrics.inc(f"capture_{processor}_reports_total")
+                if dropped_frames:
+                    self.metrics.inc("capture_backpressure_reports_total")
+                logger.info(
+                    "audio capture diagnostics: session=%s user=%s phase=%s processor=%s track_rate=%s context_rate=%s channels=%s echo=%s noise=%s agc=%s frames=%s dropped=%s buffered=%s",
+                    stats.session_id,
+                    user_id,
+                    str(event.get("phase") or "")[:20],
+                    processor,
+                    _safe_nonnegative_int(event.get("track_sample_rate")),
+                    _safe_nonnegative_int(event.get("context_sample_rate")),
+                    _safe_nonnegative_int(event.get("channel_count")),
+                    bool(event.get("echo_cancellation")),
+                    bool(event.get("noise_suppression")),
+                    bool(event.get("auto_gain_control")),
+                    _safe_nonnegative_int(event.get("frames")),
+                    dropped_frames,
+                    _safe_nonnegative_int(event.get("socket_buffered_bytes")),
+                )
+                continue
             if event_type == "assistant.home_command.result":
                 status = str(event.get("status") or "unknown")[:40]
                 execution_id = str(event.get("execution_id") or "")[:80]
@@ -843,6 +931,12 @@ class RealtimeProxy:
                     execution_id,
                     status,
                     str(event.get("message") or "")[:200],
+                )
+                await self._handle_home_command_result(
+                    event=event,
+                    upstream=upstream,
+                    writer=writer,
+                    wake_state=wake_state,
                 )
                 continue
             if event_type not in allowed:
@@ -883,6 +977,8 @@ class RealtimeProxy:
             except (json.JSONDecodeError, TypeError):
                 continue
             event_type = event.get("type", "")
+            if event_type == "conversation.item.input_audio_transcription.failed":
+                self.metrics.inc("input_audio_transcription_failed_total")
 
             item = event.get("item") if isinstance(event.get("item"), dict) else {}
             created_item_id = str(item.get("id") or event.get("item_id") or "")
@@ -902,6 +998,17 @@ class RealtimeProxy:
                     if user_turn_key in seen_user_turns:
                         continue
                     seen_user_turns.add(user_turn_key)
+
+                if self._should_filter_assistant_echo(wake_state, original_content):
+                    await self._delete_upstream_item(upstream, qwen_item_id, wake_state)
+                    self.metrics.inc("assistant_echo_transcripts_filtered_total")
+                    await writer.send(
+                        {
+                            "type": "assistant.audio.filtered",
+                            "reason": "probable_assistant_echo",
+                        }
+                    )
+                    continue
 
                 if wake_state.mode == "sleeping":
                     woke, wake_request = extract_wake_request(original_content)
@@ -939,6 +1046,7 @@ class RealtimeProxy:
                 if is_conversation_exit(content):
                     wake_state.pending_home_action = None
                     wake_state.home_plan_in_progress = False
+                    self._clear_pending_home_result(wake_state)
                     wake_state.mode = "ending"
                     await self._create_upstream_response(
                         upstream,
@@ -952,6 +1060,17 @@ class RealtimeProxy:
                     if confirmation == "confirm":
                         action = wake_state.pending_home_action
                         wake_state.pending_home_action = None
+                        self._clear_pending_home_result(wake_state)
+                        wake_state.pending_home_execution_id = action.execution_id
+                        wake_state.home_result_timeout_task = asyncio.create_task(
+                            self._wait_for_home_command_result(
+                                execution_id=action.execution_id,
+                                upstream=upstream,
+                                writer=writer,
+                                wake_state=wake_state,
+                            ),
+                            name=f"home-result-{action.execution_id[:8]}",
+                        )
                         await writer.send(
                             {
                                 "type": "assistant.home_command.pending",
@@ -965,9 +1084,12 @@ class RealtimeProxy:
                             }
                         )
                         self.metrics.inc("genie_provider_commands_total")
-                        await self._create_upstream_response(
-                            upstream,
-                            f"只用中文回答“{EXECUTE_REPLY}”不得增加解释或其他文字。",
+                        await writer.send(
+                            {
+                                "type": "assistant.agent.notice",
+                                "status": "submitting",
+                                "message": "正在等待 T10S 返回真实提交结果",
+                            }
                         )
                     elif confirmation == "cancel":
                         wake_state.pending_home_action = None
@@ -985,13 +1107,19 @@ class RealtimeProxy:
 
                 home_command = extract_home_control_command(content)
                 is_home_request = self.agent.might_be_home_request(content)
+                is_advice_only_request = self.agent.might_be_advice_only_request(content)
                 home_key = (qwen_item_id, content)
                 if (
                     wake_state.mode == "awake"
                     and is_home_request
                     and home_key not in seen_home_commands
-                    and self.settings.genie_provider_enabled
-                    and genie_provider_available
+                    and (
+                        is_advice_only_request
+                        or (
+                            self.settings.genie_provider_enabled
+                            and genie_provider_available
+                        )
+                    )
                 ):
                     seen_home_commands.add(home_key)
                     if wake_state.home_plan_in_progress:
@@ -1050,6 +1178,7 @@ class RealtimeProxy:
                     wake_state.mode = "sleeping"
                     wake_state.pending_home_action = None
                     wake_state.home_plan_in_progress = False
+                    self._clear_pending_home_result(wake_state)
                     await writer.send(
                         {
                             "type": "assistant.wake_state",
@@ -1061,6 +1190,8 @@ class RealtimeProxy:
                     )
                     await self._clear_upstream_conversation(upstream, wake_state)
             if role and content:
+                if role == "assistant":
+                    wake_state.last_assistant_transcript = content
                 qwen_item_id = str(
                     event.get("item_id")
                     or event.get("response_id")
@@ -1082,6 +1213,102 @@ class RealtimeProxy:
 
             if event_type == "error":
                 self.metrics.inc("qwen_errors_total")
+
+    def _should_filter_assistant_echo(
+        self,
+        wake_state: WakeConversationState,
+        transcript: str,
+    ) -> bool:
+        if wake_state.client_playback_active:
+            return True
+        completed_at = wake_state.client_playback_completed_at
+        if completed_at <= 0:
+            return False
+        if time.monotonic() - completed_at > self.settings.realtime_echo_guard_seconds:
+            return False
+        return is_probable_assistant_echo(
+            transcript,
+            wake_state.last_assistant_transcript,
+        )
+
+    async def _handle_home_command_result(
+        self,
+        *,
+        event: dict[str, Any],
+        upstream: ClientConnection,
+        writer: ClientWriter,
+        wake_state: WakeConversationState,
+    ) -> None:
+        execution_id = str(event.get("execution_id") or "")[:80]
+        if (
+            not execution_id
+            or execution_id != wake_state.pending_home_execution_id
+        ):
+            self.metrics.inc("genie_provider_result_unmatched_total")
+            logger.warning(
+                "ignored unmatched home command result: expected=%s actual=%s",
+                wake_state.pending_home_execution_id,
+                execution_id,
+            )
+            return
+        outcome, reply = classify_home_command_result(str(event.get("status") or ""))
+        self._clear_pending_home_result(wake_state)
+        self.metrics.inc(f"genie_provider_receipt_{outcome}_total")
+        await writer.send(
+            {
+                "type": "assistant.agent.notice",
+                "status": outcome,
+                "message": reply,
+                "execution_id": execution_id,
+            }
+        )
+        await self._create_upstream_response(
+            upstream,
+            f"只用中文回答“{reply}”不得增加解释或其他文字。",
+        )
+
+    async def _wait_for_home_command_result(
+        self,
+        *,
+        execution_id: str,
+        upstream: ClientConnection,
+        writer: ClientWriter,
+        wake_state: WakeConversationState,
+    ) -> None:
+        try:
+            await asyncio.sleep(self.settings.genie_provider_result_timeout_seconds)
+            if wake_state.pending_home_execution_id != execution_id:
+                return
+            wake_state.pending_home_execution_id = ""
+            wake_state.home_result_timeout_task = None
+            self.metrics.inc("genie_provider_receipt_timeout_total")
+            await writer.send(
+                {
+                    "type": "assistant.agent.notice",
+                    "status": "timeout",
+                    "message": SUBMIT_TIMEOUT_REPLY,
+                    "execution_id": execution_id,
+                }
+            )
+            await self._create_upstream_response(
+                upstream,
+                f"只用中文回答“{SUBMIT_TIMEOUT_REPLY}”不得增加解释或其他文字。",
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception(
+                "failed to report home command result timeout: execution=%s",
+                execution_id,
+            )
+
+    @staticmethod
+    def _clear_pending_home_result(wake_state: WakeConversationState) -> None:
+        task = wake_state.home_result_timeout_task
+        wake_state.home_result_timeout_task = None
+        wake_state.pending_home_execution_id = ""
+        if task and task is not asyncio.current_task() and not task.done():
+            task.cancel()
 
     @staticmethod
     async def _create_upstream_response(
@@ -1175,6 +1402,16 @@ class RealtimeProxy:
                 decision.action.command if decision.action else "",
                 ",".join(item.kind for item in decision.evidence),
             )
+            if wake_state.mode != "awake":
+                self.metrics.inc("agent_stale_decisions_total")
+                await writer.send(
+                    {
+                        "type": "assistant.agent.notice",
+                        "status": "cancelled",
+                        "message": "对话已结束，本次分析结果已丢弃，未执行家居操作。",
+                    }
+                )
+                return
             if decision.status == DecisionStatus.EXECUTE and decision.action:
                 evidence = [
                     {

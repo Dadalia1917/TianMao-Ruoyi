@@ -1,6 +1,19 @@
 # 天猫智家·千问智能语音助手客户端 / Tmall Smart Home Qwen Voice Client
 
-**产品版本：v1.1.0 · 文档更新时间：2026 年 8 月 14 日 18:22:47（UTC+8）**
+**产品版本：v1.1.1 · 文档更新时间：2026 年 8 月 14 日 20:04:17（UTC+8）**
+
+> 发布状态（2026 年 8 月 14 日 20:04:17）：语音识别优化与 AI-Agent 音乐放松场景已合并为 v1.1.1 正式 APK，完成签名并覆盖安装 T10S；包名 `com.jpx.tmallsmarthome`，`versionCode=111`，应用进程和 `MainActivity` 正常。
+
+> 正式 APK：`apk/天猫智家语音助手-v1.1.1.apk`，大小 1,621,553 字节，SHA-256 `988B84AF6740FF0FD60907AC9B946412B6AD409E20EF6E3D6F4341A82650F458`；v1/v2 签名有效，本地、T10S 与云端归档哈希一致。
+
+## v1.1.1 更新说明
+
+- 当前家电控制方式保持为 T10S 天猫精灵内部文字指令：客户端收到已确认事件后调用 `GenieBridge.sendToGenie()`，原生层把 `data=<家居命令>`、`method=15` 通过 `ContentResolver.insert()` 提交到 `content://com.alibaba.ailabs.genie.assistant.provider/GenieApi`，由天猫精灵控制账号中已绑定的家电。该链路不经过、也不依赖 Home Assistant。
+- 客户端只在原生调用未抛异常且返回 `accepted=true` 后，按原 `execution_id` 向 FastAPI 发送 `assistant.home_command.result / accepted_unverified`；拒绝或异常发送失败结果。`accepted_unverified` 表示“天猫精灵内部指令已提交”，不是客户端已读取到物理设备状态。
+- Agent 支持舒适情境与身心状态分流；“我有点累了”“压力很大”“想放松”会建议休息、补水，并可选择播放舒缓轻音乐，确定性安全闸禁止把它们替换成开空调。只有用户二次确认后音乐命令才会到达原生桥。
+- WebView 采集请求固定为 16 kHz、16-bit、单声道；构建脚本会把运行时加载的 `pcm-capture-worklet.js` 显式复制进 H5/App/Android 产物，避免因动态 URL 未被 Vite 发现而总是退回主线程录音。不兼容 AudioWorklet 的旧 WebView 仍会安全回退。
+- 客户端会上报实际音轨采样率、AudioContext 采样率、处理器模式、累计音频帧与 WebSocket 背压丢帧；播报开始/结束状态同时提供给服务端做第二层回灌保护。
+- 原生白名单现包含音乐播放器/音乐/歌曲及播放/来一首/放一首动作，最终命令为“播放一首舒缓的轻音乐”，继续通过 T10S 内置 `GenieApi / method=15` 提交，不依赖 Home Assistant。
 
 ## v1.1.0 更新说明
 

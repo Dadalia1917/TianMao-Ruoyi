@@ -52,6 +52,7 @@ class FakeDataTools:
                 "indoor_temperature_c": 28,
                 "indoor_humidity_percent": 68,
                 "illuminance_lux": 20,
+                "field_sources": {"illuminance_lux": "live_sensor"},
                 "device_states": {"空调": {"power": False}},
                 "time_period": "下午",
                 "preferred_temperature_c": preferred,
@@ -125,7 +126,7 @@ def test_air_conditioner_uses_weather_recommendation(monkeypatch):
     assert len(decision.decision_basis) == 2
 
 
-def test_light_uses_explicitly_simulated_environment(monkeypatch):
+def test_light_prefers_live_household_illuminance(monkeypatch):
     decision = run_plan(
         build_agent(monkeypatch), AgentRequest(transcript="打开书房灯", user_id="1")
     )
@@ -134,8 +135,8 @@ def test_light_uses_explicitly_simulated_environment(monkeypatch):
     assert decision.action is not None
     assert decision.action.parameters["brightness_percent"] == 80
     assert decision.action.command == "打开书房灯并调到80%亮度"
-    environment = next(item for item in decision.evidence if item.kind == "environment")
-    assert environment.simulated is True
+    assert any(item.kind == "household_state" for item in decision.evidence)
+    assert all(item.kind != "environment" for item in decision.evidence)
 
 
 def test_explicit_temperature_is_preserved(monkeypatch):
@@ -167,6 +168,95 @@ def test_implicit_heat_complaint_uses_complete_household_context(monkeypatch):
     assert "湿度68" in decision.user_message
     assert "室外35" in decision.user_message
     assert agent_request_is_recognized(build_agent(monkeypatch), "我有点热")
+
+
+def test_natural_short_heat_expression_is_recognized(monkeypatch):
+    agent = build_agent(monkeypatch)
+    decision = run_plan(agent, AgentRequest(transcript="我热了", user_id="1"))
+
+    assert agent.might_be_home_request("我热了")
+    assert decision.status == DecisionStatus.EXECUTE
+    assert decision.action is not None
+    assert decision.action.command == "打开客厅空调并设置为25度"
+
+
+def test_stuffy_room_proposes_fresh_air_with_confirmation(monkeypatch):
+    decision = run_plan(
+        build_agent(monkeypatch), AgentRequest(transcript="屋里很闷", user_id="1")
+    )
+
+    assert decision.status == DecisionStatus.EXECUTE
+    assert decision.action is not None
+    assert decision.action.device == "新风"
+    assert decision.action.command == "打开客厅新风"
+    assert decision.action.requires_confirmation is True
+
+
+def test_bright_room_recommends_lower_light_level(monkeypatch):
+    decision = run_plan(
+        build_agent(monkeypatch), AgentRequest(transcript="灯太亮了", user_id="1")
+    )
+
+    assert decision.status == DecisionStatus.EXECUTE
+    assert decision.action is not None
+    assert decision.action.parameters["brightness_percent"] == 30
+    assert decision.action.command == "打开客厅灯并调到30%亮度"
+
+
+def test_fatigue_proposes_relaxing_music_instead_of_air_conditioner(monkeypatch):
+    agent = build_agent(monkeypatch)
+    decision = run_plan(agent, AgentRequest(transcript="我累了", user_id="1"))
+
+    assert agent.might_be_home_request("我累了")
+    assert agent.might_be_wellbeing_request("我累了")
+    assert not agent.might_be_advice_only_request("我累了")
+    assert decision.status == DecisionStatus.EXECUTE
+    assert decision.action is not None
+    assert decision.action.device == "音乐播放器"
+    assert decision.action.action == "play"
+    assert decision.action.command == "播放一首舒缓的轻音乐"
+    assert decision.action.requires_confirmation is True
+    assert "空调" not in decision.user_message
+    assert "五到十分钟" in decision.user_message
+    assert any(item.kind == "household_state" for item in decision.evidence)
+
+
+def test_direct_relaxing_music_request_uses_provider_channel(monkeypatch):
+    agent = build_agent(monkeypatch)
+    decision = run_plan(
+        agent, AgentRequest(transcript="播放一首舒缓的轻音乐", user_id="1")
+    )
+
+    assert agent.might_be_home_request("播放一首舒缓的轻音乐")
+    assert decision.status == DecisionStatus.EXECUTE
+    assert decision.action is not None
+    assert decision.action.device == "音乐播放器"
+    assert decision.action.action == "play"
+    assert decision.action.command == "播放一首舒缓的轻音乐"
+
+
+def test_thirst_remains_advice_only_without_device_provider(monkeypatch):
+    agent = build_agent(monkeypatch)
+    decision = run_plan(agent, AgentRequest(transcript="我渴了", user_id="1"))
+
+    assert agent.might_be_advice_only_request("我渴了")
+    assert decision.status == DecisionStatus.ADVISE
+    assert decision.action is None
+
+
+def test_health_alert_only_triggers_emergency_notice(monkeypatch):
+    decision = run_plan(
+        build_agent(monkeypatch),
+        AgentRequest(transcript="我胸痛而且呼吸困难", user_id="1"),
+    )
+
+    assert decision.status == DecisionStatus.ADVISE
+    assert decision.action is None
+    assert "120" in decision.user_message
+
+
+def test_negated_feeling_does_not_enter_agent(monkeypatch):
+    assert not build_agent(monkeypatch).might_be_home_request("我现在不累了")
 
 
 def agent_request_is_recognized(agent: HouseholdAgentService, text: str) -> bool:

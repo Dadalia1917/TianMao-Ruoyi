@@ -31,7 +31,12 @@
         reconnectTimer: null,
         keepaliveTimer: null,
         foregroundHandler: null,
-        foregroundResumePending: false
+        foregroundResumePending: false,
+        captureProcessorMode: '',
+        captureTrackSettings: {},
+        captureFrames: 0,
+        captureDroppedFrames: 0,
+        captureDiagnosticAt: 0
       }
     },
     mounted() {
@@ -286,6 +291,10 @@
           this.emit({ type: 'user.text', text: event.transcript || '', final: true })
           return
         }
+        if (type === 'conversation.item.input_audio_transcription.failed') {
+          this.emit({ type: 'voice.warning', message: '这句话没有听清，请再说一次' })
+          return
+        }
         if (type === 'response.created') {
           this.assistantText = ''
           this.speakingSent = false
@@ -356,6 +365,8 @@
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: {
             channelCount: 1,
+            sampleRate: 16000,
+            sampleSize: 16,
             echoCancellation: true,
             noiseSuppression: true,
             autoGainControl: true
@@ -364,16 +375,31 @@
         })
         const AudioContextClass = window.AudioContext || window.webkitAudioContext
         if (!AudioContextClass) throw new Error('当前设备不支持 Web Audio')
-        const context = new AudioContextClass()
+        let context
+        try {
+          context = new AudioContextClass({ sampleRate: 16000 })
+        } catch (error) {
+          // Older Android WebView versions do not accept AudioContextOptions.
+          context = new AudioContextClass()
+        }
         if (context.state === 'suspended') await context.resume()
         const source = context.createMediaStreamSource(stream)
         this.mediaStream = stream
         this.captureContext = context
         this.mediaSource = source
+        this.captureFrames = 0
+        this.captureDroppedFrames = 0
+        this.captureDiagnosticAt = 0
+        const audioTrack = stream.getAudioTracks()[0]
+        this.captureTrackSettings = audioTrack && typeof audioTrack.getSettings === 'function'
+          ? audioTrack.getSettings()
+          : {}
 
         let processor = await this.createCaptureWorklet(context)
+        this.captureProcessorMode = 'audio_worklet'
 
         if (!processor) {
+          this.captureProcessorMode = 'script_processor'
           processor = context.createScriptProcessor(2048, 1, 1)
           processor.onaudioprocess = audioEvent => {
             this.sendCaptureFrame(audioEvent.inputBuffer.getChannelData(0), context.sampleRate)
@@ -382,6 +408,7 @@
         source.connect(processor)
         processor.connect(context.destination)
         this.processor = processor
+        this.sendAudioDiagnostics('started', true)
       },
       async createCaptureWorklet(context) {
         const WorkletNode = window.AudioWorkletNode
@@ -450,13 +477,42 @@
       },
       sendCaptureFrame(input, inputRate) {
         if (this.muted || this.captureSuppressed || !this.socket || this.socket.readyState !== WebSocket.OPEN) return
-        if (this.socket.bufferedAmount > 512 * 1024) return
+        if (this.socket.bufferedAmount > 512 * 1024) {
+          this.captureDroppedFrames += 1
+          this.sendAudioDiagnostics('backpressure')
+          return
+        }
         const pcm = this.downsampleToPcm16(input, inputRate, TARGET_INPUT_RATE)
         if (!pcm.length) return
+        this.captureFrames += 1
         this.socket.send(JSON.stringify({
           type: 'input_audio_buffer.append',
           audio: this.bytesToBase64(new Uint8Array(pcm.buffer))
         }))
+        this.sendAudioDiagnostics('periodic')
+      },
+      sendAudioDiagnostics(phase, force = false) {
+        if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return
+        const now = Date.now()
+        if (!force && now - this.captureDiagnosticAt < 30000) return
+        this.captureDiagnosticAt = now
+        const track = this.captureTrackSettings || {}
+        try {
+          this.socket.send(JSON.stringify({
+            type: 'client.audio_diagnostics',
+            phase: String(phase || 'periodic'),
+            processor: this.captureProcessorMode || 'unknown',
+            track_sample_rate: Number(track.sampleRate || 0),
+            context_sample_rate: Number((this.captureContext && this.captureContext.sampleRate) || 0),
+            channel_count: Number(track.channelCount || 0),
+            echo_cancellation: Boolean(track.echoCancellation),
+            noise_suppression: Boolean(track.noiseSuppression),
+            auto_gain_control: Boolean(track.autoGainControl),
+            frames: this.captureFrames,
+            dropped_frames: this.captureDroppedFrames,
+            socket_buffered_bytes: Number(this.socket.bufferedAmount || 0)
+          }))
+        } catch (error) {}
       },
       stopCapture() {
         if (this.processor) {
@@ -480,6 +536,8 @@
         this.mediaSource = null
         this.mediaStream = null
         this.captureContext = null
+        this.captureProcessorMode = ''
+        this.captureTrackSettings = {}
       },
       setMuted(value) {
         this.muted = value
@@ -593,17 +651,26 @@
         if (this.assistantPlaybackPending) return
         this.assistantPlaybackPending = true
         this.captureSuppressed = true
+        this.sendPlaybackState('started')
         if (this.socket && this.socket.readyState === WebSocket.OPEN) {
           try { this.socket.send(JSON.stringify({ type: 'input_audio_buffer.clear' })) } catch (error) {}
         }
       },
       resetAcousticRelay() {
+        const assistantPlaybackWasPending = this.assistantPlaybackPending
         if (this.relaySafetyTimer) clearTimeout(this.relaySafetyTimer)
         this.relaySafetyTimer = null
         this.assistantPlaybackPending = false
         this.acousticRelayPending = false
         this.homeCommandPending = false
         this.captureSuppressed = false
+        if (assistantPlaybackWasPending) this.sendPlaybackState('done')
+      },
+      sendPlaybackState(state) {
+        if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return
+        try {
+          this.socket.send(JSON.stringify({ type: `client.playback.${state}` }))
+        } catch (error) {}
       },
       downsampleToPcm16(input, inputRate, outputRate) {
         if (!input || !input.length || outputRate > inputRate) return new Int16Array(0)

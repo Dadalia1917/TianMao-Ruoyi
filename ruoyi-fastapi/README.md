@@ -1,10 +1,14 @@
 # 天猫智家实时语音服务
 
-**产品版本：v1.1.0 · 文档更新时间：2026 年 8 月 14 日 18:22:47（UTC+8）**
+**产品版本：v1.1.1 · 文档更新时间：2026 年 8 月 14 日 20:04:17（UTC+8）**
+
+> 发布状态（2026 年 8 月 14 日 20:04:17）：v1.1.1 语音与 Agent 联动版已部署到阿里云；`ai-gateway:1.1.1` 健康，公网 `/health/ready` 返回 `version=1.1.1`、`household_agent=ready`，云端 Qwen3.8-Max Function Calling 实测通过。
+
+> 验收结果：完整测试 `96 passed`；客户端播报期转写拦截、播报结束后的相似转写过滤、采集诊断指标、可配置 VAD 和 PCM Worklet 均已同步云端。云端“我有点累了”返回待确认的舒缓音乐方案，“我渴了”只给建议且无设备动作。
 
 完整的软件说明、技术栈、UML、ER 图、接口总表和部署指南请阅读仓库根目录 `README.md`。
 
-当前版本负责已登录用户的实时语音对话、六模型文字对话、自动续接、账号长期记忆和智能家居 Agent。v1.1.0 使用 LangGraph 单总控编排、Qwen Function Calling、确定性安全策略与环境工具，把低风险家居计划转换为结构化事件；T10S 客户端收到事件后，通过 Android `ContentResolver` 调用本机天猫精灵 `ContentProvider`。外部天猫精灵声学转发仅作为可选兼容实验，默认关闭。当前尚未接入 Home Assistant，后续可把真实设备状态工具接入现有 Agent，不需要改变移动端事件协议。
+当前版本负责已登录用户的实时语音对话、六模型文字对话、自动续接、账号长期记忆和智能家居 Agent。v1.1.1 使用 LangGraph 单总控、`qwen3.8-max` Function Calling、确定性安全策略与环境工具，把低风险计划转换为待确认事件；疲劳、压力和想放松固定建议休息、补水，并可选择播放舒缓轻音乐，模型后安全闸禁止误换为空调。用户同意后由 T10S Android 通过天猫精灵内部 `GenieApi / method=15` 文字指令控制已绑定家电或调用音乐播放。Home Assistant 当前未接入且不是控制前置条件；未来的传感器或网关只作为可选状态来源。
 
 ## 一键启动
 
@@ -48,7 +52,7 @@ python main.py
 
 ## 常见开发问题
 
-- `GET /api/v1/memories 404`：通常是修改源码后仍在运行旧 FastAPI 进程。结束原来的 `main.py`，重新启动后确认根接口返回当前产品版本 `1.1.0`，并在 `/docs` 中看到记忆路由。`OPTIONS 200` 只说明 CORS 中间件响应正常，不能证明业务路由已加载。
+- `GET /api/v1/memories 404`：通常是修改源码后仍在运行旧 FastAPI 进程。结束原来的 `main.py`，重新启动后确认根接口返回当前产品版本 `1.1.1`，并在 `/docs` 中看到记忆路由。`OPTIONS 200` 只说明 CORS 中间件响应正常，不能证明业务路由已加载。
 - 浏览器提示 `ScriptProcessorNode is deprecated`：这是 AudioWorklet 静态文件未加载时的兼容回退警告，不会中断语音。停止并重新运行 HBuilderX H5、执行一次强制刷新；当前页面会尝试应用路径、站点根路径和 Blob 三种方式加载 AudioWorklet。
 
 ## 实时链路
@@ -97,7 +101,10 @@ python main.py
 - `MAX_CONNECTIONS`：单进程并发 WebSocket 上限，默认 300。
 - `MAX_CONNECTIONS_PER_USER`：单账号会话上限，默认 3。
 - `UPSTREAM_ROTATE_SECONDS`：千问单连接主动轮换时间，默认 6900 秒；客户端会自动续接。
+- `REALTIME_VAD_THRESHOLD` / `REALTIME_VAD_PREFIX_PADDING_MS` / `REALTIME_VAD_SILENCE_DURATION_MS`：远场语义 VAD 阈值、句首缓冲和句尾静音，默认 `0.5 / 500 / 800`，用于 T10S 真机 A/B 调参。
+- `REALTIME_ECHO_GUARD_SECONDS`：客户端播报完成后，仅过滤与上一段助手播报高度相似转写的时间窗口，默认 3 秒。
 - `GENIE_PROVIDER_ENABLED`：是否向声明支持本机天猫精灵 Provider 的客户端发送低风险家居命令事件，默认开启。
+- `GENIE_PROVIDER_RESULT_TIMEOUT_SECONDS`：用户确认后等待 T10S 原生桥提交结果的时限，默认 8 秒；超时必须按失败播报。
 - `ACOUSTIC_RELAY_ENABLED`：是否启用外部天猫精灵声学转发实验功能，默认关闭；只有本机 Provider 不可用且明确需要兼容实验时才开启。
 - `ACOUSTIC_RELAY_WAKE_PHRASE`：外部设备唤醒词，默认 `天猫精灵`。
 - `RUOYI_AUTH_URL`：RuoYi 的 `/getInfo` 完整地址；每次语音建连都必须通过账号校验。
@@ -136,27 +143,31 @@ APP 的可回看历史默认保存在设备本地并按 RuoYi 用户 ID 分区�
 
 ## 智能家居 Agent
 
-v1.1.0 已把 Agent 作为 FastAPI 内部独立模块落地，代码位于 `assistant_server/agent/`。架构采用一个 LangGraph 总控 Agent 和少量有边界的工具，而不是为天气、灯光、空调各启动一个会互相聊天的 Agent：这样能减少实时语音延迟、重复推理和不一致决策。
+v1.1.1 继续把 Agent 作为 FastAPI 内部独立模块，代码位于 `assistant_server/agent/`。架构采用一个 LangGraph 总控 Agent 和少量有边界的工具，规划模型固定为 `qwen3.8-max`；普通语音仍由 Qwen3.5 Omni 实时处理。
 
 ```text
 Omni 最终转写
   -> 家居意图预筛（普通聊天仍走实时直连）
   -> LangGraph：分析 -> 风险/澄清/环境规划 -> 最终校验
   -> 天气工具或模拟照度工具
-  -> Qwen Function Calling 提交严格 ModelPlan
+  -> Qwen3.8-Max Function Calling 提交严格 ModelPlan/WellbeingAdvice
   -> 播报家庭状态、依据、推荐参数和拟执行动作，进入待确认状态
   -> 用户明确同意 -> 二次安全校验 -> assistant.home_command.pending
-  -> WebView GenieBridge -> Android ContentResolver -> GenieApi
+  -> WebView GenieBridge -> Android ContentResolver -> GenieApi / method=15
+  -> 天猫精灵内部解析文字指令并控制已绑定家电
+  -> assistant.home_command.result(execution_id, accepted_unverified/rejected)
+  -> 仅按真实提交结果播报“已提交”或“未提交成功”
 ```
 
 执行约束：
 
 - Agent 的 `execute` 只表示可以向用户提出执行建议，不会立即向 Android 发送指令；只有处于待确认状态且用户明确同意后才发送。明确拒绝会取消并恢复休眠，含糊答复会要求用户明确说“执行”或“取消”。
 - `advise`、`clarify`、`blocked`、`not_applicable`、异常和超时均不会执行。
+- 疲劳、压力/烦躁和想放松可形成 `音乐播放器/play` 的待确认方案，固定命令“播放一首舒缓的轻音乐”，不得替换为空调；困倦、睡眠、口渴、饥饿、头痛和噪声仍属于 `advise`。胸痛、呼吸困难、昏厥等只给安全求助提醒，均不映射成家电动作。
 - 门锁、燃气、烹饪加热和安防等高风险设备在模型调用前即被确定性策略拦截。
 - 空调在用户未指定温度时先查询当地天气；灯光在没有真实传感器时使用低可信、明确标记为模拟的照度。
 - 用户明确给出的安全参数优先；长期记忆仅作为偏好参考，不能充当授权、不能覆盖本轮命令或安全规则。
 - 模型输出必须通过 Pydantic 严格结构校验、设备一致性检查和温度/亮度范围裁剪。
-- Provider 接收只能表示“已提交”，不能宣称灯或空调已经成功动作。
+- 当前操作家电的正式方式就是 T10S 天猫精灵内部 `GenieApi` 文字指令，不依赖 Home Assistant。Provider 接收只能表示“天猫精灵已接受提交”，不能宣称客户端已经读取到灯或空调的物理状态。
 
 项目只直接依赖 `langgraph`，不需要安装完整 `langchain`；测试也使用 `asyncio.run()`，不要求 `pytest-asyncio`。Dify 可保留给未来运营人员配置知识库或非实时流程，不进入当前低延迟语音控制主链路。

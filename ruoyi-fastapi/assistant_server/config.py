@@ -48,7 +48,12 @@ class Settings:
     dashscope_realtime_url: str
     dashscope_model: str
     dashscope_voice: str
+    realtime_vad_threshold: float
+    realtime_vad_prefix_padding_ms: int
+    realtime_vad_silence_duration_ms: int
+    realtime_echo_guard_seconds: float
     genie_provider_enabled: bool
+    genie_provider_result_timeout_seconds: int
     acoustic_relay_enabled: bool
     acoustic_relay_wake_phrase: str
     host: str
@@ -130,7 +135,22 @@ class Settings:
                 "DASHSCOPE_MODEL", "qwen3.5-omni-plus-realtime"
             ).strip(),
             dashscope_voice=os.getenv("DASHSCOPE_VOICE", "Ethan").strip(),
+            realtime_vad_threshold=min(
+                1.0, max(0.0, _as_float("REALTIME_VAD_THRESHOLD", 0.5))
+            ),
+            realtime_vad_prefix_padding_ms=_as_int(
+                "REALTIME_VAD_PREFIX_PADDING_MS", 500, 100
+            ),
+            realtime_vad_silence_duration_ms=_as_int(
+                "REALTIME_VAD_SILENCE_DURATION_MS", 800, 200
+            ),
+            realtime_echo_guard_seconds=max(
+                0.0, _as_float("REALTIME_ECHO_GUARD_SECONDS", 3.0)
+            ),
             genie_provider_enabled=_as_bool("GENIE_PROVIDER_ENABLED", True),
+            genie_provider_result_timeout_seconds=_as_int(
+                "GENIE_PROVIDER_RESULT_TIMEOUT_SECONDS", 8, 3
+            ),
             acoustic_relay_enabled=_as_bool("ACOUSTIC_RELAY_ENABLED", False),
             acoustic_relay_wake_phrase=os.getenv(
                 "ACOUSTIC_RELAY_WAKE_PHRASE", "天猫精灵"
@@ -215,7 +235,7 @@ class Settings:
                 "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
             ).strip(),
             agent_model=os.getenv(
-                "AGENT_MODEL", "qwen3.7-plus-2026-05-26"
+                "AGENT_MODEL", "qwen3.8-max"
             ).strip(),
             agent_timeout_seconds=_as_int("AGENT_TIMEOUT_SECONDS", 15, 3),
             agent_max_tool_rounds=_as_int("AGENT_MAX_TOOL_ROUNDS", 3, 1),

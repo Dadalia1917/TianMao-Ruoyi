@@ -79,7 +79,7 @@ class AgentDecision(BaseModel):
     action: DeviceAction | None = None
     evidence: list[Evidence] = Field(default_factory=list)
     used_function_calling: bool = False
-    policy_version: str = "household-agent-1.1"
+    policy_version: str = "household-agent-1.1.1"
     created_at: datetime
 
 
@@ -126,3 +126,12 @@ class ModelPlan(BaseModel):
     user_message: str = Field(min_length=1, max_length=300)
     rationale: str = Field(min_length=1, max_length=600)
     parameters: dict[str, Any] = Field(default_factory=dict)
+
+
+class WellbeingAdvice(BaseModel):
+    """Strict, non-actuating advice returned for human-state scenarios."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    user_message: str = Field(min_length=1, max_length=400)
+    rationale: str = Field(min_length=1, max_length=600)

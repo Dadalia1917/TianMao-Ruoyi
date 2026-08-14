@@ -1,5 +1,5 @@
 {
-  "version": "1.1.0",
+  "version": "1.1.1",
   "prompt": "template",
   "title": "天猫智家服务协议与隐私政策",
   "message": "　　欢迎使用天猫智家语音助手。实时语音功能需要使用麦克风，并通过网络将语音发送至云端完成识别与回复；当前版本默认不保存原始音频。<br/>　　请阅读<a href=\"static/service.html\">《用户服务协议》</a>和<a href=\"static/privacy.html\">《隐私政策》</a>。同意后，我们才会进入应用并按需申请系统权限。",

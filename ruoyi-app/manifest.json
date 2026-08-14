@@ -2,8 +2,8 @@
     "name" : "天猫智家语音助手",
     "appid" : "__UNI__25A9D80",
     "description" : "基于千问实时语音的天猫智能家居助手",
-    "versionName" : "1.1.0",
-    "versionCode" : "110",
+    "versionName" : "1.1.1",
+    "versionCode" : "111",
     "transformPx" : false,
     "uniStatistics" : {
         "enable" : false

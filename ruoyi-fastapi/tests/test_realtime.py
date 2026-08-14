@@ -7,10 +7,12 @@ from assistant_server.realtime import (
     CapacityError,
     ConnectionLimiter,
     build_session_update,
+    classify_home_command_result,
     classify_home_confirmation,
     classify_upstream_connection_error,
     extract_wake_request,
     extract_home_control_command,
+    is_probable_assistant_echo,
     is_conversation_exit,
     should_start_acoustic_relay,
 )
@@ -21,13 +23,41 @@ def test_session_is_pure_realtime_voice(monkeypatch):
     event = build_session_update(Settings.from_env())
     session = event["session"]
     assert session["modalities"] == ["text", "audio"]
-    assert session["input_audio_format"] == "pcm16"
-    assert session["output_audio_format"] == "pcm16"
+    assert session["input_audio_format"] == "pcm"
+    assert session["output_audio_format"] == "pcm"
     assert session["turn_detection"]["type"] == "semantic_vad"
-    assert session["turn_detection"]["threshold"] == 0.35
+    assert session["turn_detection"]["threshold"] == 0.5
+    assert session["turn_detection"]["prefix_padding_ms"] == 500
+    assert session["turn_detection"]["silence_duration_ms"] == 800
     assert session["turn_detection"]["create_response"] is False
     assert session["turn_detection"]["interrupt_response"] is True
     assert "tools" not in session
+
+
+def test_realtime_vad_can_be_tuned_without_code_changes(monkeypatch):
+    monkeypatch.setenv("REALTIME_VAD_THRESHOLD", "0.62")
+    monkeypatch.setenv("REALTIME_VAD_PREFIX_PADDING_MS", "650")
+    monkeypatch.setenv("REALTIME_VAD_SILENCE_DURATION_MS", "950")
+
+    turn_detection = build_session_update(Settings.from_env())["session"]["turn_detection"]
+
+    assert turn_detection["threshold"] == 0.62
+    assert turn_detection["prefix_padding_ms"] == 650
+    assert turn_detection["silence_duration_ms"] == 950
+
+
+@pytest.mark.parametrize(
+    ("transcript", "assistant_text", "expected"),
+    (
+        ("今天天气很好，适合出去走走", "今天天气很好，适合出去走走。", True),
+        ("天气很好适合出去走走", "今天天气很好，适合出去走走。", True),
+        ("今天天气很好适合出去走一走", "今天天气很好，适合出去走走。", True),
+        ("好的，帮我执行", "是否按这个方案执行？", False),
+        ("好的", "好的，需要时再叫我。", False),
+    ),
+)
+def test_probable_assistant_echo_filter(transcript, assistant_text, expected):
+    assert is_probable_assistant_echo(transcript, assistant_text) is expected
 
 
 @pytest.mark.parametrize(
@@ -117,6 +147,23 @@ def test_home_control_confirmation_is_explicit(transcript, expected):
     assert classify_home_confirmation(transcript) == expected
 
 
+@pytest.mark.parametrize(
+    ("status", "outcome", "message_fragment"),
+    (
+        ("accepted_unverified", "submitted", "已提交给天猫精灵"),
+        ("rejected", "failed", "没有提交成功"),
+        ("unknown", "failed", "没有提交成功"),
+    ),
+)
+def test_native_home_receipt_never_claims_device_execution(
+    status, outcome, message_fragment
+):
+    actual_outcome, reply = classify_home_command_result(status)
+    assert actual_outcome == outcome
+    assert message_fragment in reply
+    assert "执行成功" not in reply
+
+
 def test_low_risk_home_command_uses_local_genie_provider_prompt():
     settings = Settings.from_env()
     instructions = build_session_update(
@@ -150,6 +197,7 @@ def test_low_risk_home_command_uses_local_genie_provider_prompt():
         ("启动卧室加湿器", "启动卧室加湿器"),
         ("让扫地机器人开始清扫", "让扫地机器人开始清扫"),
         ("普通插座关闭", "普通插座关闭"),
+        ("播放一首舒缓的轻音乐", "播放一首舒缓的轻音乐"),
     ),
 )
 def test_common_low_risk_home_devices_share_provider_channel(transcript, expected):

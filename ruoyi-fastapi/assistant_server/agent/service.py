@@ -13,7 +13,12 @@ from langgraph.graph import END, START, StateGraph
 from pydantic import ValidationError
 
 from ..config import Settings
-from .prompts import HOUSEHOLD_AGENT_PROMPT, build_user_prompt
+from .prompts import (
+    HOUSEHOLD_AGENT_PROMPT,
+    WELLBEING_ADVICE_PROMPT,
+    build_user_prompt,
+    build_wellbeing_prompt,
+)
 from .schemas import (
     ActionLevel,
     AgentDecision,
@@ -25,6 +30,7 @@ from .schemas import (
     HouseholdStateUpdate,
     ModelPlan,
     RiskLevel,
+    WellbeingAdvice,
 )
 from .tools import HouseholdDataTools
 from .state import HouseholdStateStore
@@ -33,6 +39,10 @@ logger = logging.getLogger(__name__)
 
 
 _DEVICE_ALIASES: tuple[tuple[str, str], ...] = (
+    ("音乐播放器", "音乐播放器"),
+    ("轻音乐", "音乐播放器"),
+    ("音乐", "音乐播放器"),
+    ("歌曲", "音乐播放器"),
     ("空气净化器", "空气净化器"),
     ("扫地机器人", "扫地机器人"),
     ("智能插座", "智能插座"),
@@ -70,16 +80,51 @@ _DISCUSSION = (
     "我刚才说", "比如", "例如", "能不能控制", "可不可以控制",
 )
 _ACTION_WORDS = (
+    "播放", "来一首", "放一首", "听",
     "打开", "开启", "启动", "关闭", "关掉", "停止", "调到", "调成", "设为", "设置为",
     "升高", "降低", "调高", "调低", "调亮", "调暗", "调大", "调小", "提高", "减小",
     "切换", "拉开", "拉上", "合上", "清扫", "扫地", "回充", "开", "关",
 )
 _COMFORT_PATTERNS: tuple[tuple[str, tuple[str, ...], str], ...] = (
-    ("hot", ("有点热", "好热", "太热", "很热", "闷热", "有点闷", "热死了"), "空调"),
-    ("cold", ("有点冷", "好冷", "太冷", "很冷", "冻死了"), "空调"),
-    ("dark", ("有点暗", "太暗", "好暗", "看不清", "屋里黑", "房间黑"), "灯"),
+    (
+        "hot",
+        ("有点热", "好热", "太热", "很热", "闷热", "热死了", "我热了", "热了", "感觉热", "屋里热"),
+        "空调",
+    ),
+    (
+        "cold",
+        ("有点冷", "好冷", "太冷", "很冷", "冻死了", "我冷了", "冷了", "感觉冷", "屋里冷"),
+        "空调",
+    ),
+    ("dark", ("有点暗", "太暗", "好暗", "看不清", "屋里黑", "房间黑", "光线太暗"), "灯"),
+    ("bright", ("太亮", "有点刺眼", "很刺眼", "光线刺眼", "灯太亮"), "灯"),
     ("humid", ("有点潮", "太潮", "好潮", "湿气重", "太湿了"), "除湿机"),
     ("dry", ("有点干", "太干", "好干", "空气干燥"), "加湿器"),
+    ("stuffy", ("有点闷", "好闷", "太闷", "空气有点闷", "屋里很闷", "房间很闷", "不通风", "想透透气"), "新风"),
+    ("air_quality", ("空气不好", "空气有味道", "有异味", "灰尘很大", "空气不舒服"), "空气净化器"),
+)
+
+_WELLBEING_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("fatigue", ("我累了", "有点累", "好累", "太累", "很疲惫", "有点疲惫", "精疲力尽")),
+    ("sleepy", ("我困了", "有点困", "好困", "太困", "困死了", "想睡觉", "犯困")),
+    ("sleep_problem", ("睡不着", "失眠了", "一直没睡着", "难以入睡")),
+    ("stress", ("压力很大", "压力好大", "有点焦虑", "很焦虑", "心里很烦", "好烦", "太烦了", "很烦躁", "想放松", "我想放松一下")),
+    ("thirst", ("我渴了", "有点渴", "好渴", "口渴")),
+    ("hunger", ("我饿了", "有点饿", "好饿", "肚子饿")),
+    ("headache", ("有点头疼", "有点头痛", "头有点晕", "轻微头晕")),
+    ("noise", ("太吵了", "有点吵", "噪音好大", "声音太吵")),
+)
+
+_RELAXATION_SCENARIOS = {"fatigue", "stress"}
+
+_HEALTH_ALERTS = (
+    "胸痛", "胸口剧痛", "呼吸困难", "喘不上气", "无法呼吸", "昏倒", "昏厥",
+    "意识不清", "严重过敏", "嘴唇发紫", "突然说不清话", "一侧无力",
+)
+
+_NEGATED_FEELINGS = (
+    "不热", "不冷", "不累", "不困", "不渴", "不饿", "不焦虑", "不烦",
+    "没有压力", "没那么累", "没那么困", "没事",
 )
 
 
@@ -92,11 +137,20 @@ class AgentState(TypedDict, total=False):
     action: str
     risk_level: RiskLevel
     needs_context: bool
-    route: Literal["not_applicable", "blocked", "clarify", "direct", "contextual"]
+    route: Literal[
+        "not_applicable",
+        "blocked",
+        "clarify",
+        "direct",
+        "contextual",
+        "wellbeing",
+        "health_notice",
+    ]
     evidence: list[Evidence]
     model_plan: ModelPlan
     used_function_calling: bool
     comfort_intent: str
+    wellbeing_scenario: str
     decision: AgentDecision
 
 
@@ -123,6 +177,8 @@ class HouseholdAgentService:
         graph.add_node("not_applicable", self._not_applicable)
         graph.add_node("direct_plan", self._direct_plan)
         graph.add_node("context_plan", self._context_plan)
+        graph.add_node("wellbeing", self._wellbeing_advice)
+        graph.add_node("health_notice", self._health_notice)
         graph.add_node("validate", self._validate)
         graph.add_edge(START, "analyze")
         graph.add_conditional_edges(
@@ -134,6 +190,8 @@ class HouseholdAgentService:
                 "not_applicable": "not_applicable",
                 "direct": "direct_plan",
                 "contextual": "context_plan",
+                "wellbeing": "wellbeing",
+                "health_notice": "health_notice",
             },
         )
         graph.add_edge("blocked", END)
@@ -141,6 +199,8 @@ class HouseholdAgentService:
         graph.add_edge("not_applicable", END)
         graph.add_edge("direct_plan", "validate")
         graph.add_edge("context_plan", "validate")
+        graph.add_edge("wellbeing", END)
+        graph.add_edge("health_notice", END)
         graph.add_edge("validate", END)
         self._graph = graph.compile()
 
@@ -185,8 +245,12 @@ class HouseholdAgentService:
 
     def might_be_home_request(self, transcript: str) -> bool:
         text = "".join(str(transcript or "").split())
+        if any(marker in text for marker in _HEALTH_ALERTS):
+            return True
+        if self._wellbeing_scenario(text):
+            return not any(marker in text for marker in _NEGATED_FEELINGS)
         if self._comfort_intent(text):
-            if any(marker in text for marker in _NEGATIONS):
+            if any(marker in text for marker in _NEGATIONS + _NEGATED_FEELINGS):
                 return False
             return not any(marker in text for marker in _DISCUSSION)
         has_device = any(alias in text for alias, _ in _DEVICE_ALIASES) or any(
@@ -198,6 +262,25 @@ class HouseholdAgentService:
         if any(marker in text for marker in _NEGATIONS):
             return False
         return not any(marker in text for marker in _DISCUSSION)
+
+    def might_be_wellbeing_request(self, transcript: str) -> bool:
+        """Return true for recognized human-state scenarios, including urgent notices."""
+        text = "".join(str(transcript or "").split())
+        if any(marker in text for marker in _HEALTH_ALERTS):
+            return True
+        return bool(self._wellbeing_scenario(text)) and not any(
+            marker in text for marker in _NEGATED_FEELINGS
+        )
+
+    def might_be_advice_only_request(self, transcript: str) -> bool:
+        """Return true when the Agent can answer without a working device provider."""
+        text = "".join(str(transcript or "").split())
+        if any(marker in text for marker in _HEALTH_ALERTS):
+            return True
+        scenario = self._wellbeing_scenario(text)
+        return bool(scenario and scenario not in _RELAXATION_SCENARIOS) and not any(
+            marker in text for marker in _NEGATED_FEELINGS
+        )
 
     async def update_household_state(
         self, user_id: str, room: str, update: HouseholdStateUpdate
@@ -256,8 +339,26 @@ class HouseholdAgentService:
 
     def _analyze(self, state: AgentState) -> dict[str, Any]:
         text = "".join(state["request"].transcript.split())
+        if any(marker in text for marker in _HEALTH_ALERTS):
+            return {
+                "route": "health_notice",
+                "risk_level": RiskLevel.L4,
+                "wellbeing_scenario": "health_alert",
+            }
         if any(marker in text for marker in _UNSAFE):
             return {"route": "blocked", "risk_level": RiskLevel.L4}
+        wellbeing_scenario = self._wellbeing_scenario(text)
+        if wellbeing_scenario in _RELAXATION_SCENARIOS:
+            return {
+                "route": "contextual",
+                "device": "音乐播放器",
+                "room": "",
+                "action": "play",
+                "risk_level": RiskLevel.L1,
+                "needs_context": True,
+                "comfort_intent": "relax_music",
+                "wellbeing_scenario": wellbeing_scenario,
+            }
         comfort_intent = self._comfort_intent(text)
         if comfort_intent:
             device = next(
@@ -278,6 +379,17 @@ class HouseholdAgentService:
                 "needs_context": True,
                 "comfort_intent": comfort_intent,
             }
+        if wellbeing_scenario:
+            return {
+                "route": "wellbeing",
+                "risk_level": RiskLevel.L0,
+                "needs_context": True,
+                "wellbeing_scenario": wellbeing_scenario,
+                "room": next(
+                    (name for name in _ROOMS if name in text),
+                    self.settings.agent_default_room,
+                ),
+            }
         device = next((canonical for alias, canonical in _DEVICE_ALIASES if alias in text), "")
         if not device or not self.might_be_home_request(text):
             return {"route": "not_applicable", "device": device}
@@ -286,6 +398,8 @@ class HouseholdAgentService:
             return {"route": "clarify", "device": device, "room": room}
         if any(word in text for word in ("关闭", "关掉", "停止")):
             action = "close"
+        elif any(word in text for word in ("播放", "来一首", "放一首", "听")):
+            action = "play"
         elif "回充" in text:
             action = "dock"
         elif any(word in text for word in ("清扫", "扫地")):
@@ -309,6 +423,13 @@ class HouseholdAgentService:
     @staticmethod
     def _comfort_intent(text: str) -> str:
         for name, markers, _device in _COMFORT_PATTERNS:
+            if any(marker in text for marker in markers):
+                return name
+        return ""
+
+    @staticmethod
+    def _wellbeing_scenario(text: str) -> str:
+        for name, markers in _WELLBEING_PATTERNS:
             if any(marker in text for marker in markers):
                 return name
         return ""
@@ -339,6 +460,19 @@ class HouseholdAgentService:
                 state,
                 status=DecisionStatus.NOT_APPLICABLE,
                 user_message="这不是一条可执行的家居控制指令。",
+            )
+        }
+
+    def _health_notice(self, state: AgentState) -> dict[str, Any]:
+        return {
+            "decision": self._base_decision(
+                state,
+                status=DecisionStatus.ADVISE,
+                user_message=(
+                    "这可能是需要立即处理的健康风险。请马上停止当前活动，联系身边的人并拨打120；"
+                    "如果环境存在危险，先在确保自身安全的前提下离开危险源。"
+                ),
+                rationale="检测到胸痛、呼吸困难、意识异常等紧急风险表达，安全提醒优先且不触发家电。",
             )
         }
 
@@ -443,6 +577,7 @@ class HouseholdAgentService:
                             )
                             continue
                         plan = ModelPlan.model_validate(arguments)
+                        evidence = self._prune_redundant_environment(evidence)
                         return {
                             "model_plan": plan,
                             "evidence": evidence,
@@ -472,9 +607,139 @@ class HouseholdAgentService:
         fallback["used_function_calling"] = used_function_calling
         return fallback
 
+    async def _wellbeing_advice(self, state: AgentState) -> dict[str, Any]:
+        evidence: list[Evidence] = []
+        if self._data_tools:
+            evidence = self._replace_evidence(
+                evidence,
+                await self._data_tools.get_household_state(
+                    user_id=state["request"].user_id,
+                    room=state.get("room") or self.settings.agent_default_room,
+                    memory_context=state["request"].memory_context,
+                ),
+            )
+        scenario = state.get("wellbeing_scenario", "fatigue")
+        fallback_message, fallback_rationale = self._fallback_wellbeing_advice(
+            scenario, evidence
+        )
+        advice = WellbeingAdvice(
+            user_message=fallback_message,
+            rationale=fallback_rationale,
+        )
+        used_function_calling = False
+        if self.ready and self._client:
+            try:
+                payload = {
+                    "model": self.settings.agent_model,
+                    "messages": [
+                        {"role": "system", "content": WELLBEING_ADVICE_PROMPT},
+                        {
+                            "role": "user",
+                            "content": build_wellbeing_prompt(
+                                state["request"].transcript,
+                                scenario,
+                                state["request"].location_name
+                                or self.settings.agent_location_name,
+                                [item.summary for item in evidence],
+                                state["request"].memory_context,
+                            ),
+                        },
+                    ],
+                    "tools": [self._wellbeing_tool_definition()],
+                    "tool_choice": {
+                        "type": "function",
+                        "function": {"name": "submit_wellbeing_advice"},
+                    },
+                    "enable_thinking": False,
+                    "temperature": 0.2,
+                    "max_tokens": 500,
+                }
+                response = await self._client.post(
+                    self.settings.agent_api_url,
+                    json=payload,
+                    timeout=self.settings.agent_timeout_seconds,
+                )
+                response.raise_for_status()
+                message = response.json()["choices"][0]["message"]
+                tool_call = next(
+                    (
+                        item
+                        for item in (message.get("tool_calls") or [])
+                        if (item.get("function") or {}).get("name")
+                        == "submit_wellbeing_advice"
+                    ),
+                    None,
+                )
+                if tool_call:
+                    model_advice = WellbeingAdvice.model_validate(
+                        self._json_object((tool_call.get("function") or {}).get("arguments"))
+                    )
+                    used_function_calling = True
+                    if any(
+                        alias in model_advice.user_message
+                        for alias, _canonical in _DEVICE_ALIASES
+                    ) or any(marker in model_advice.user_message for marker in _UNSAFE):
+                        logger.warning(
+                            "wellbeing advice mentioned a controlled device; using safe fallback: scenario=%s",
+                            scenario,
+                        )
+                    else:
+                        advice = model_advice
+            except (httpx.HTTPError, KeyError, TypeError, ValueError, ValidationError):
+                logger.exception(
+                    "wellbeing advice model failed; using deterministic fallback: scenario=%s",
+                    scenario,
+                )
+        state_with_evidence = dict(state)
+        state_with_evidence["evidence"] = evidence
+        state_with_evidence["used_function_calling"] = used_function_calling
+        return {
+            "evidence": evidence,
+            "used_function_calling": used_function_calling,
+            "decision": self._base_decision(
+                state_with_evidence,
+                status=DecisionStatus.ADVISE,
+                user_message=advice.user_message,
+                rationale=advice.rationale,
+            ),
+        }
+
+    def _fallback_wellbeing_advice(
+        self, scenario: str, evidence: list[Evidence]
+    ) -> tuple[str, str]:
+        suggestions = {
+            "fatigue": "建议先坐下休息五到十分钟，少量补水并暂时停止连续用眼；如果休息后仍明显乏力或持续加重，请联系家人并考虑就医。",
+            "sleepy": "如果环境安全，建议先停止驾车、登高或操作设备，再安排二十分钟左右的小睡；醒来后补水并活动一下。",
+            "sleep_problem": "建议先把灯光和屏幕调暗，进行几分钟缓慢呼吸；二十分钟仍无睡意时可暂时离床做安静活动，困倦后再尝试入睡。",
+            "stress": "建议先做两分钟缓慢呼吸，暂时降低声音和屏幕刺激，再只选最紧急的一件事拆成一个小步骤处理。",
+            "thirst": "建议少量多次补水，先避免大量含糖或含咖啡因饮料；如果异常口渴持续并伴随明显不适，请考虑就医。",
+            "hunger": "建议先选择一份清淡、适量的食物并慢慢进食；临睡前避免一次吃得过多。",
+            "headache": "建议先停止盯屏，坐下休息并少量补水；如果突然剧烈、持续加重，或伴随说话不清、一侧无力等情况，请立即联系120。",
+            "noise": "建议先离开持续噪声源或关闭不必要的声源，给自己几分钟安静时间；不要长时间用过高耳机音量遮盖噪声。",
+        }
+        context = evidence[0].summary if evidence else "当前没有可靠的家庭传感器数据"
+        suggestion = suggestions.get(
+            scenario,
+            "建议先短暂休息、补水并观察感受变化；如果持续或明显加重，请联系家人或专业医护人员。",
+        )
+        return f"{context}。{suggestion}", f"结合{context}给出非医疗性的生活建议。"
+
     def _validate(self, state: AgentState) -> dict[str, Any]:
         plan = state["model_plan"]
         device = state["device"]
+        if state.get("wellbeing_scenario") in _RELAXATION_SCENARIOS:
+            # A human-state request must never be translated into an inferred
+            # appliance action. Pin the safe proposal after model planning too.
+            plan = plan.model_copy(
+                update={
+                    "command": "播放一首舒缓的轻音乐",
+                    "device": "音乐播放器",
+                    "room": "",
+                    "action": "play",
+                    "parameters": {},
+                    "rationale": "用户表达疲劳或放松诉求，采用非侵入的音乐建议，不推断空调等家电操作。",
+                }
+            )
         planned_device = next(
             (
                 canonical
@@ -495,6 +760,15 @@ class HouseholdAgentService:
                 )
             }
         parameters = self._sanitize_parameters(device, plan.parameters)
+        # The model may recommend a parameter only when the user left it open.
+        # Explicit safe values from the transcript always win over model output
+        # and long-term preference memory.
+        parameters.update(
+            self._sanitize_parameters(
+                device,
+                self._extract_parameters(state["request"].transcript),
+            )
+        )
         command = self._enforce_recommended_command(state, plan.command, parameters)
         action = DeviceAction(
             command=command,
@@ -553,7 +827,11 @@ class HouseholdAgentService:
                 if household
                 else environment.data.get("illuminance_lux") if environment else None
             )
-            brightness = self._recommended_brightness(lux)
+            brightness = (
+                30
+                if state.get("comfort_intent") == "bright"
+                else self._recommended_brightness(lux)
+            )
             params["brightness_percent"] = brightness
             source = "实时室内照度" if household and not household.simulated else "模拟室内照度"
             rationale = f"根据{source}，建议亮度为{brightness}%。"
@@ -576,24 +854,32 @@ class HouseholdAgentService:
         self, state: AgentState, params: dict[str, Any], room_device: str
     ) -> str:
         action = state["action"]
+        if state.get("wellbeing_scenario") in _RELAXATION_SCENARIOS:
+            return "播放一首舒缓的轻音乐"
         if action == "close":
             return f"关闭{room_device}"
         if state["device"] == "空调" and "temperature_c" in params:
             return f"打开{room_device}并设置为{params['temperature_c']}度"
         if state["device"] == "灯" and "brightness_percent" in params:
             return f"打开{room_device}并调到{params['brightness_percent']}%亮度"
+        if state.get("comfort_intent") and action == "open":
+            return f"打开{room_device}"
         return self._normalize_command(state["request"].transcript)
 
     def _enforce_recommended_command(
         self, state: AgentState, command: str, params: dict[str, Any]
     ) -> str:
         room_device = f"{state.get('room', '')}{state['device']}"
+        if state.get("wellbeing_scenario") in _RELAXATION_SCENARIOS:
+            return "播放一首舒缓的轻音乐"
         if state["action"] == "close":
             return f"关闭{room_device}"
         if state["device"] == "空调" and "temperature_c" in params:
             return f"打开{room_device}并设置为{params['temperature_c']}度"
         if state["device"] == "灯" and "brightness_percent" in params:
             return f"打开{room_device}并调到{params['brightness_percent']}%亮度"
+        if state.get("comfort_intent") and state["action"] == "open":
+            return f"打开{room_device}"
         return self._normalize_command(command)
 
     def _extract_parameters(self, transcript: str) -> dict[str, Any]:
@@ -717,6 +1003,12 @@ class HouseholdAgentService:
             (item for item in evidence if item.kind == "household_state"), None
         )
         weather = next((item for item in evidence if item.kind == "weather"), None)
+        if state.get("wellbeing_scenario") in _RELAXATION_SCENARIOS:
+            feeling = "有些疲惫" if state.get("wellbeing_scenario") == "fatigue" else "需要放松"
+            return (
+                f"听起来你{feeling}。建议先休息五到十分钟、喝几口水；"
+                "也可以让天猫精灵播放一首舒缓的轻音乐，帮助你放松。"
+            )
         if state.get("device") == "空调":
             target = params.get("temperature_c")
             indoor = household.data.get("indoor_temperature_c") if household else None
@@ -759,6 +1051,10 @@ class HouseholdAgentService:
             return f"{room}湿度偏高，建议开启除湿机。"
         if state.get("comfort_intent") == "dry":
             return f"{room}空气偏干，建议开启加湿器。"
+        if state.get("comfort_intent") == "stuffy":
+            return f"{room}空气有些闷，建议开启新风。"
+        if state.get("comfort_intent") == "air_quality":
+            return f"{room}空气质量不佳，建议开启空气净化器。"
         household_summary = household.summary if household else "当前家庭状态暂以可用信息为准"
         return f"{household_summary}；建议执行：{state['request'].transcript}。"
 
@@ -803,11 +1099,19 @@ class HouseholdAgentService:
                 ),
             )
             kinds.add("household_state")
-        if state.get("device") == "灯" and "environment" not in kinds:
+        household = next(
+            (item for item in evidence if item.kind == "household_state"), None
+        )
+        needs_light_fallback = not self._has_live_illuminance(household)
+        if (
+            state.get("device") == "灯"
+            and needs_light_fallback
+            and "environment" not in kinds
+        ):
             evidence = self._replace_evidence(
                 evidence, await self._data_tools.get_environment()
             )
-        return evidence
+        return self._prune_redundant_environment(evidence)
 
     def _missing_required_evidence(
         self, state: AgentState, evidence: list[Evidence]
@@ -816,9 +1120,33 @@ class HouseholdAgentService:
         required = {"household_state"} if state.get("needs_context") else set()
         if state.get("device") == "空调":
             required.add("weather")
-        if state.get("device") == "灯":
+        household = next(
+            (item for item in evidence if item.kind == "household_state"), None
+        )
+        if state.get("device") == "灯" and not self._has_live_illuminance(household):
             required.add("environment")
         return sorted(required - kinds)
+
+    @staticmethod
+    def _has_live_illuminance(household: Evidence | None) -> bool:
+        if not household:
+            return False
+        sources = household.data.get("field_sources", {})
+        return (
+            isinstance(sources, dict)
+            and sources.get("illuminance_lux") == "live_sensor"
+            and isinstance(household.data.get("illuminance_lux"), (int, float))
+        )
+
+    def _prune_redundant_environment(
+        self, evidence: list[Evidence]
+    ) -> list[Evidence]:
+        household = next(
+            (item for item in evidence if item.kind == "household_state"), None
+        )
+        if self._has_live_illuminance(household):
+            return [item for item in evidence if item.kind != "environment"]
+        return evidence
 
     def _json_object(self, raw: Any) -> dict[str, Any]:
         if isinstance(raw, dict):
@@ -865,3 +1193,14 @@ class HouseholdAgentService:
                 },
             },
         ]
+
+    @staticmethod
+    def _wellbeing_tool_definition() -> dict[str, Any]:
+        return {
+            "type": "function",
+            "function": {
+                "name": "submit_wellbeing_advice",
+                "description": "提交不触发设备操作的最终生活状态建议。",
+                "parameters": WellbeingAdvice.model_json_schema(),
+            },
+        }

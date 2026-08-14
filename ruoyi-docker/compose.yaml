@@ -51,7 +51,7 @@ services:
     build:
       context: ..
       dockerfile: ruoyi-docker/dockerfiles/java.Dockerfile
-    image: tmall-smart-home/java-api:1.1.0
+    image: tmall-smart-home/java-api:1.1.1
     restart: unless-stopped
     environment:
       TZ: Asia/Shanghai
@@ -96,7 +96,7 @@ services:
     build:
       context: ..
       dockerfile: ruoyi-docker/dockerfiles/fastapi.Dockerfile
-    image: tmall-smart-home/ai-gateway:1.1.0
+    image: tmall-smart-home/ai-gateway:1.1.1
     restart: unless-stopped
     environment:
       TZ: Asia/Shanghai
@@ -104,12 +104,17 @@ services:
       DASHSCOPE_REALTIME_URL: ${DASHSCOPE_REALTIME_URL:-wss://dashscope.aliyuncs.com/api-ws/v1/realtime}
       DASHSCOPE_MODEL: ${DASHSCOPE_MODEL:-qwen3.5-omni-plus-realtime}
       DASHSCOPE_VOICE: ${DASHSCOPE_VOICE:-Ethan}
+      REALTIME_VAD_THRESHOLD: ${REALTIME_VAD_THRESHOLD:-0.5}
+      REALTIME_VAD_PREFIX_PADDING_MS: ${REALTIME_VAD_PREFIX_PADDING_MS:-500}
+      REALTIME_VAD_SILENCE_DURATION_MS: ${REALTIME_VAD_SILENCE_DURATION_MS:-800}
+      REALTIME_ECHO_GUARD_SECONDS: ${REALTIME_ECHO_GUARD_SECONDS:-3}
       GENIE_PROVIDER_ENABLED: ${GENIE_PROVIDER_ENABLED:-true}
+      GENIE_PROVIDER_RESULT_TIMEOUT_SECONDS: ${GENIE_PROVIDER_RESULT_TIMEOUT_SECONDS:-8}
       ACOUSTIC_RELAY_ENABLED: ${ACOUSTIC_RELAY_ENABLED:-false}
       ACOUSTIC_RELAY_WAKE_PHRASE: ${ACOUSTIC_RELAY_WAKE_PHRASE:-天猫精灵}
       AGENT_ENABLED: ${AGENT_ENABLED:-true}
       AGENT_API_URL: ${AGENT_API_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions}
-      AGENT_MODEL: ${AGENT_MODEL:-qwen3.7-plus-2026-05-26}
+      AGENT_MODEL: ${AGENT_MODEL:-qwen3.8-max}
       AGENT_TIMEOUT_SECONDS: ${AGENT_TIMEOUT_SECONDS:-15}
       AGENT_MAX_TOOL_ROUNDS: ${AGENT_MAX_TOOL_ROUNDS:-3}
       AGENT_LOCATION_NAME: ${AGENT_LOCATION_NAME:-无锡}
@@ -193,7 +198,7 @@ services:
     build:
       context: ..
       dockerfile: ruoyi-docker/dockerfiles/gateway.Dockerfile
-    image: tmall-smart-home/web-gateway:1.1.0
+    image: tmall-smart-home/web-gateway:1.1.1
     restart: unless-stopped
     environment:
       PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:-http://:80}
