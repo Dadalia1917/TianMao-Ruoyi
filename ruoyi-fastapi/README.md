@@ -30,6 +30,9 @@ python main.py
 - Agent 规划调试：`POST http://127.0.0.1:8001/api/v1/agent/plan`（需要 RuoYi Token，只返回计划，不直接越过客户端执行）
 
 `main.py` 会自动读取同目录下的 `.env`；`.env` 已被 `.gitignore` 排除，API Key 不会进入源码。
+从公司 Gitea 首次克隆后，即使尚未创建 `.env`，本地 MySQL 也会按团队开发约定使用
+`root / 123456` 连接 `127.0.0.1:3306/ry-cat`。仍建议先复制 `.env.example`，以便填写
+`DASHSCOPE_API_KEY` 和覆盖个人环境中的数据库地址；生产环境必须通过环境变量使用独立强密码。
 若已有语音会话表但缺少 `ai_user_memory`，服务会自动创建这张助手自管表，便于开发环境一键启动。
 
 ## HBuilderX H5 查看
