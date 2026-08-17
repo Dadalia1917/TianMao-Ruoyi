@@ -152,6 +152,54 @@ def extract_confirmed_home_addition(transcript: str) -> str:
     return request[:500]
 
 
+def extract_pending_home_addition(transcript: str) -> str:
+    """Extract an additive request that still needs final confirmation.
+
+    A pending proposal must not be discarded when the user says a natural
+    sentence such as ``需要，并且帮我打开空调``.  Explicit replacement phrases
+    deliberately do not match this helper and continue through the replan path.
+    """
+    text = str(transcript or "").strip()
+    if not text or re.search(r"(?:不要|不用|取消|改成|换成|换为|只要|别)", text):
+        return ""
+    match = re.match(
+        r"^(?:(?:需要|要的?|可以|好|好的|行|没问题)(?:啊|吧)?"
+        r"[，,。;；\s]*)?"
+        r"(?:并且|同时|顺便|顺带|另外|再|还要|还|也)(?:可以)?"
+        r"(?P<request>.+)$",
+        text,
+    )
+    if not match:
+        return ""
+    request = str(match.group("request") or "").strip("，,。.!！?？;；：:、 ")
+    request = re.sub(r"^(?:请|麻烦|可以)?(?:再)?", "", request).strip()
+    return request[:500]
+
+
+def extract_pending_home_replacement(transcript: str) -> str:
+    """Return the new request only when replacement intent is explicit."""
+    text = str(transcript or "").strip()
+    if not text:
+        return ""
+    patterns = (
+        r"^(?:不需要|不用|不要)?(?:这个方案|原方案|原来的方案|原来的|音乐方案|音乐|它)?"
+        r"[，,。;；\s]*(?:改成|换成|换为|改为|替换成|只要|而是)"
+        r"(?P<request>.+)$",
+        r"^(?:不需要|不用|不要)(?:这个方案|原方案|原来的方案|原来的|音乐方案|音乐|它)?"
+        r"[，,。;；\s]+(?:或者|但是|不过|而是)(?:改成|换成|换为|改为)?"
+        r"(?P<request>.+)$",
+    )
+    for pattern in patterns:
+        match = re.match(pattern, text)
+        if not match:
+            continue
+        request = str(match.group("request") or "").strip(
+            "，,。.!！?？;；：:、 "
+        )
+        return request[:500]
+    return ""
+
+
 def is_pending_replan_request(transcript: str) -> bool:
     compact = re.sub(r"[\s，,。.!！?？;；：:、~～]+", "", str(transcript or ""))
     return compact in {
@@ -176,6 +224,11 @@ def classify_home_command_result(status: str) -> tuple[str, str]:
     normalized = str(status or "").strip().lower()
     if normalized == "accepted_unverified":
         return "submitted", SUBMIT_SUCCESS_REPLY
+    if normalized == "partially_accepted_unverified":
+        return (
+            "partial",
+            "部分指令已提交给天猫精灵，仍有指令未提交，请以设备实际状态为准。",
+        )
     return "failed", SUBMIT_FAILED_REPLY
 
 
@@ -459,6 +512,7 @@ def build_session_update(
 @dataclass(slots=True)
 class PendingHomeAction:
     command: str
+    commands: list[str]
     execution_id: str
     message: str
     rationale: str
@@ -953,7 +1007,7 @@ class RealtimeProxy:
                 if dropped_frames:
                     self.metrics.inc("capture_backpressure_reports_total")
                 logger.info(
-                    "audio capture diagnostics: session=%s user=%s phase=%s processor=%s track_rate=%s context_rate=%s channels=%s echo=%s noise=%s agc=%s frames=%s dropped=%s buffered=%s",
+                    "audio capture diagnostics: session=%s user=%s phase=%s processor=%s track_rate=%s context_rate=%s channels=%s echo=%s noise=%s agc=%s rms_x10000=%s peak_x10000=%s gain_x100=%s music=%s frames=%s dropped=%s buffered=%s",
                     stats.session_id,
                     user_id,
                     str(event.get("phase") or "")[:20],
@@ -964,6 +1018,10 @@ class RealtimeProxy:
                     bool(event.get("echo_cancellation")),
                     bool(event.get("noise_suppression")),
                     bool(event.get("auto_gain_control")),
+                    _safe_nonnegative_int(event.get("input_rms_x10000")),
+                    _safe_nonnegative_int(event.get("input_peak_x10000")),
+                    _safe_nonnegative_int(event.get("software_gain_x100")),
+                    bool(event.get("music_playback_active")),
                     _safe_nonnegative_int(event.get("frames")),
                     dropped_frames,
                     _safe_nonnegative_int(event.get("socket_buffered_bytes")),
@@ -1127,9 +1185,16 @@ class RealtimeProxy:
 
                 if wake_state.pending_home_action is not None:
                     action = wake_state.pending_home_action
-                    addition = extract_confirmed_home_addition(content)
+                    confirmed_addition = extract_confirmed_home_addition(content)
+                    pending_addition = (
+                        ""
+                        if confirmed_addition
+                        else extract_pending_home_addition(content)
+                    )
+                    replacement = extract_pending_home_replacement(content)
                     confirmation = classify_home_confirmation(content)
-                    if addition:
+                    if confirmed_addition or pending_addition:
+                        addition = confirmed_addition or pending_addition
                         wake_state.pending_home_action = None
                         self._clear_pending_home_result(wake_state)
                         if wake_state.home_plan_in_progress:
@@ -1150,8 +1215,31 @@ class RealtimeProxy:
                                     session_id=stats.session_id,
                                     memory_context=memory_context,
                                     confirmed_base_action=action,
+                                    submit_combined=bool(confirmed_addition),
                                 ),
                                 name=f"home-agent-addition-{stats.session_id[:8]}",
+                            )
+                    elif replacement:
+                        wake_state.pending_home_action = None
+                        if wake_state.home_plan_in_progress:
+                            wake_state.pending_home_action = action
+                            await self._create_upstream_response(
+                                upstream,
+                                "只用中文回答“我正在按你的要求替换方案，请稍等。”不得增加其他文字。",
+                            )
+                        else:
+                            wake_state.home_plan_in_progress = True
+                            asyncio.create_task(
+                                self._plan_and_dispatch_home_command(
+                                    writer=writer,
+                                    upstream=upstream,
+                                    wake_state=wake_state,
+                                    transcript=replacement,
+                                    user_id=user_id,
+                                    session_id=stats.session_id,
+                                    memory_context=memory_context,
+                                ),
+                                name=f"home-agent-replace-{stats.session_id[:8]}",
                             )
                     elif confirmation == "confirm":
                         await self._submit_home_action(
@@ -1212,8 +1300,10 @@ class RealtimeProxy:
                                     user_id=user_id,
                                     session_id=stats.session_id,
                                     memory_context=memory_context,
+                                    confirmed_base_action=action,
+                                    submit_combined=False,
                                 ),
-                                name=f"home-agent-replace-{stats.session_id[:8]}",
+                                name=f"home-agent-implicit-addition-{stats.session_id[:8]}",
                             )
                     else:
                         await self._create_upstream_response(
@@ -1372,6 +1462,7 @@ class RealtimeProxy:
             {
                 "type": "assistant.home_command.pending",
                 "command": action.command,
+                "commands": action.commands or [action.command],
                 "execution_id": action.execution_id,
                 "source": "household_agent_confirmed",
                 "message": action.message,
@@ -1532,6 +1623,7 @@ class RealtimeProxy:
         session_id: str,
         memory_context: str,
         confirmed_base_action: PendingHomeAction | None = None,
+        submit_combined: bool = False,
     ) -> None:
         await writer.send(
             {
@@ -1586,6 +1678,7 @@ class RealtimeProxy:
                 ]
                 proposed_action = PendingHomeAction(
                     command=decision.action.command,
+                    commands=[decision.action.command],
                     execution_id=decision.execution_id,
                     message=decision.user_message,
                     rationale=decision.rationale,
@@ -1599,10 +1692,19 @@ class RealtimeProxy:
                             confirmed_base_action.command,
                             proposed_action.command,
                         ),
+                        commands=list(
+                            dict.fromkeys(
+                                (
+                                    confirmed_base_action.commands
+                                    or [confirmed_base_action.command]
+                                )
+                                + (proposed_action.commands or [proposed_action.command])
+                            )
+                        )[:4],
                         execution_id=proposed_action.execution_id,
                         message=(
-                            f"{confirmed_base_action.message}；补充要求："
-                            f"{proposed_action.message}"
+                            "已保留原方案并加入补充要求。当前拟执行："
+                            f"{combine_home_commands(confirmed_base_action.command, proposed_action.command)}。"
                         )[:500],
                         rationale=(
                             f"{confirmed_base_action.rationale}；"
@@ -1619,12 +1721,30 @@ class RealtimeProxy:
                             f"{confirmed_base_action.transcript}；{transcript}"
                         )[:500],
                     )
-                    await self._submit_home_action(
-                        action=combined_action,
-                        writer=writer,
-                        upstream=upstream,
-                        wake_state=wake_state,
-                    )
+                    if submit_combined:
+                        await self._submit_home_action(
+                            action=combined_action,
+                            writer=writer,
+                            upstream=upstream,
+                            wake_state=wake_state,
+                        )
+                    else:
+                        wake_state.pending_home_action = combined_action
+                        await writer.send(
+                            {
+                                "type": "assistant.agent.notice",
+                                "status": "awaiting_confirmation",
+                                "message": combined_action.message,
+                                "rationale": combined_action.rationale,
+                                "decision_basis": combined_action.decision_basis,
+                                "evidence": combined_action.evidence,
+                            }
+                        )
+                        await self._create_upstream_response(
+                            upstream,
+                            "请明确告诉用户原方案已保留、补充动作已加入，并朗读以下合并方案后询问是否执行。"
+                            f"只说这段内容：{combined_action.message}需要我执行这个合并方案吗？",
+                        )
                     return
                 wake_state.pending_home_action = proposed_action
                 await writer.send(

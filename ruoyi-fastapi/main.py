@@ -239,6 +239,7 @@ async def agent_capabilities(request: Request) -> dict[str, Any]:
         "enabled": request.app.state.agent.enabled,
         "function_calling": request.app.state.agent.ready,
         "policy_fallback": True,
+        "intent_handlers": request.app.state.agent.intent_handler_catalog(),
         "devices": [
             "灯", "空调", "新风", "窗帘", "电视", "投影仪", "风扇",
             "空气净化器", "加湿器", "除湿机", "扫地机器人", "智能插座",
@@ -251,7 +252,7 @@ async def agent_capabilities(request: Request) -> dict[str, Any]:
         "household_state_ttl_seconds": settings.agent_household_state_ttl_seconds,
         "default_room": settings.agent_default_room,
         "execution_channel": "android_genie_content_provider",
-        "policy_version": "household-agent-1.1",
+        "policy_version": "household-agent-1.2",
     }
 
 

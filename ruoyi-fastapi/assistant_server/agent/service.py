@@ -33,101 +33,25 @@ from .schemas import (
     RiskLevel,
     WellbeingAdvice,
 )
+from .handlers import (
+    ACTION_WORDS as _ACTION_WORDS,
+    DEVICE_ALIASES as _DEVICE_ALIASES,
+    HEALTH_ALERTS as _HEALTH_ALERTS,
+    IntentContext,
+    IntentHandler,
+    IntentHandlerRegistry,
+    NEGATED_FEELINGS as _NEGATED_FEELINGS,
+    RELAXATION_DEVICES as _RELAXATION_DEVICES,
+    RELAXATION_SCENARIOS as _RELAXATION_SCENARIOS,
+    UNSAFE_MARKERS as _UNSAFE,
+    default_intent_handlers,
+    find_comfort_intent,
+    find_wellbeing_scenario,
+)
 from .tools import HouseholdDataTools
 from .state import HouseholdStateStore
 
 logger = logging.getLogger(__name__)
-
-
-_DEVICE_ALIASES: tuple[tuple[str, str], ...] = (
-    ("音乐播放器", "音乐播放器"),
-    ("轻音乐", "音乐播放器"),
-    ("音乐", "音乐播放器"),
-    ("歌曲", "音乐播放器"),
-    ("空气净化器", "空气净化器"),
-    ("扫地机器人", "扫地机器人"),
-    ("智能插座", "智能插座"),
-    ("普通插座", "普通插座"),
-    ("投影仪", "投影仪"),
-    ("投影机", "投影仪"),
-    ("加湿器", "加湿器"),
-    ("除湿机", "除湿机"),
-    ("净化器", "空气净化器"),
-    ("扫地机", "扫地机器人"),
-    ("新风", "新风"),
-    ("空调", "空调"),
-    ("窗帘", "窗帘"),
-    ("纱帘", "窗帘"),
-    ("百叶帘", "窗帘"),
-    ("电视", "电视"),
-    ("风扇", "风扇"),
-    ("投影", "投影仪"),
-    ("照明", "灯"),
-    ("灯", "灯"),
-    ("插座", "智能插座"),
-)
-_ROOMS = (
-    "主卧", "次卧", "儿童房", "老人房", "客厅", "卧室", "书房", "厨房",
-    "餐厅", "卫生间", "浴室", "阳台", "玄关", "全屋",
-)
-_UNSAFE = (
-    "门锁", "开锁", "燃气", "燃气灶", "灶具", "电磁炉", "烤箱", "微波炉",
-    "热水器", "车库门", "监控", "摄像头", "撤防", "报警器", "电热毯", "取暖器",
-)
-_NEGATIONS = ("不要", "别", "不用", "取消", "不需要")
-_DISCUSSION = (
-    "怎么", "如何", "为什么", "方法", "教程", "原理", "区别", "开了吗", "关了吗",
-    "开着吗", "关着吗", "亮着吗", "有没有开", "有没有关", "设备状态",
-    "我刚才说", "比如", "例如", "能不能控制", "可不可以控制",
-)
-_ACTION_WORDS = (
-    "播放", "来一首", "放一首", "听",
-    "打开", "开启", "启动", "关闭", "关掉", "停止", "调到", "调成", "设为", "设置为",
-    "升高", "降低", "调高", "调低", "调亮", "调暗", "调大", "调小", "提高", "减小",
-    "切换", "拉开", "拉上", "合上", "清扫", "扫地", "回充", "开", "关",
-)
-_COMFORT_PATTERNS: tuple[tuple[str, tuple[str, ...], str], ...] = (
-    (
-        "hot",
-        ("有点热", "好热", "太热", "很热", "闷热", "热死了", "我热了", "热了", "感觉热", "屋里热"),
-        "空调",
-    ),
-    (
-        "cold",
-        ("有点冷", "好冷", "太冷", "很冷", "冻死了", "我冷了", "冷了", "感觉冷", "屋里冷"),
-        "空调",
-    ),
-    ("dark", ("有点暗", "太暗", "好暗", "看不清", "屋里黑", "房间黑", "光线太暗"), "灯"),
-    ("bright", ("太亮", "有点刺眼", "很刺眼", "光线刺眼", "灯太亮"), "灯"),
-    ("humid", ("有点潮", "太潮", "好潮", "湿气重", "太湿了"), "除湿机"),
-    ("dry", ("有点干", "太干", "好干", "空气干燥"), "加湿器"),
-    ("stuffy", ("有点闷", "好闷", "太闷", "空气有点闷", "屋里很闷", "房间很闷", "不通风", "想透透气"), "新风"),
-    ("air_quality", ("空气不好", "空气有味道", "有异味", "灰尘很大", "空气不舒服"), "空气净化器"),
-)
-
-_WELLBEING_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("fatigue", ("我累了", "有点累", "好累", "太累", "很疲惫", "有点疲惫", "精疲力尽")),
-    ("sleepy", ("我困了", "有点困", "好困", "太困", "困死了", "想睡觉", "犯困")),
-    ("sleep_problem", ("睡不着", "失眠了", "一直没睡着", "难以入睡")),
-    ("stress", ("压力很大", "压力好大", "有点焦虑", "很焦虑", "心里很烦", "好烦", "太烦了", "很烦躁", "想放松", "我想放松一下")),
-    ("thirst", ("我渴了", "有点渴", "好渴", "口渴")),
-    ("hunger", ("我饿了", "有点饿", "好饿", "肚子饿")),
-    ("headache", ("有点头疼", "有点头痛", "头有点晕", "轻微头晕")),
-    ("noise", ("太吵了", "有点吵", "噪音好大", "声音太吵")),
-)
-
-_RELAXATION_SCENARIOS = {"fatigue", "stress"}
-_RELAXATION_DEVICES = ("空调", "风扇", "音乐播放器")
-
-_HEALTH_ALERTS = (
-    "胸痛", "胸口剧痛", "呼吸困难", "喘不上气", "无法呼吸", "昏倒", "昏厥",
-    "意识不清", "严重过敏", "嘴唇发紫", "突然说不清话", "一侧无力",
-)
-
-_NEGATED_FEELINGS = (
-    "不热", "不冷", "不累", "不困", "不渴", "不饿", "不焦虑", "不烦",
-    "没有压力", "没那么累", "没那么困", "没事",
-)
 
 
 class AgentState(TypedDict, total=False):
@@ -167,6 +91,7 @@ class HouseholdAgentService:
         self._client: httpx.AsyncClient | None = None
         self._data_tools: HouseholdDataTools | None = None
         self._rng = random.SystemRandom()
+        self._intent_handlers = IntentHandlerRegistry(default_intent_handlers())
         self._state_store = HouseholdStateStore(
             ttl_seconds=settings.agent_household_state_ttl_seconds,
             redis_host=settings.agent_state_redis_host,
@@ -249,23 +174,18 @@ class HouseholdAgentService:
 
     def might_be_home_request(self, transcript: str) -> bool:
         text = "".join(str(transcript or "").split())
-        if any(marker in text for marker in _HEALTH_ALERTS):
-            return True
-        if self._wellbeing_scenario(text):
-            return not any(marker in text for marker in _NEGATED_FEELINGS)
-        if self._comfort_intent(text):
-            if any(marker in text for marker in _NEGATIONS + _NEGATED_FEELINGS):
-                return False
-            return not any(marker in text for marker in _DISCUSSION)
-        has_device = any(alias in text for alias, _ in _DEVICE_ALIASES) or any(
-            marker in text for marker in _UNSAFE
+        return self._intent_handlers.accepts_as_entrypoint(
+            IntentContext(text=text, default_room=self.settings.agent_default_room)
         )
-        has_action = any(marker in text for marker in _ACTION_WORDS)
-        if not text or not has_device or not has_action:
-            return False
-        if any(marker in text for marker in _NEGATIONS):
-            return False
-        return not any(marker in text for marker in _DISCUSSION)
+
+    def register_intent_handler(
+        self, handler: IntentHandler, *, replace: bool = False
+    ) -> None:
+        """Register an intent plug-in before serving requests."""
+        self._intent_handlers.register(handler, replace=replace)
+
+    def intent_handler_catalog(self) -> list[dict[str, Any]]:
+        return self._intent_handlers.catalog()
 
     def might_be_wellbeing_request(self, transcript: str) -> bool:
         """Return true for recognized human-state scenarios, including urgent notices."""
@@ -343,104 +263,17 @@ class HouseholdAgentService:
 
     def _analyze(self, state: AgentState) -> dict[str, Any]:
         text = "".join(state["request"].transcript.split())
-        if any(marker in text for marker in _HEALTH_ALERTS):
-            return {
-                "route": "health_notice",
-                "risk_level": RiskLevel.L4,
-                "wellbeing_scenario": "health_alert",
-            }
-        if any(marker in text for marker in _UNSAFE):
-            return {"route": "blocked", "risk_level": RiskLevel.L4}
-        wellbeing_scenario = self._wellbeing_scenario(text)
-        if wellbeing_scenario in _RELAXATION_SCENARIOS:
-            return {
-                "route": "contextual",
-                "device": "",
-                "room": next(
-                    (name for name in _ROOMS if name in text),
-                    self.settings.agent_default_room,
-                ),
-                "action": "recommend",
-                "risk_level": RiskLevel.L2,
-                "needs_context": True,
-                "comfort_intent": "relax",
-                "wellbeing_scenario": wellbeing_scenario,
-                "allowed_devices": _RELAXATION_DEVICES,
-            }
-        comfort_intent = self._comfort_intent(text)
-        if comfort_intent:
-            device = next(
-                device
-                for name, _markers, device in _COMFORT_PATTERNS
-                if name == comfort_intent
-            )
-            room = next(
-                (name for name in _ROOMS if name in text),
-                self.settings.agent_default_room,
-            )
-            return {
-                "route": "contextual",
-                "device": device,
-                "room": room,
-                "action": "set" if device in {"空调", "灯"} else "open",
-                "risk_level": RiskLevel.L2 if device == "空调" else RiskLevel.L1,
-                "needs_context": True,
-                "comfort_intent": comfort_intent,
-            }
-        if wellbeing_scenario:
-            return {
-                "route": "wellbeing",
-                "risk_level": RiskLevel.L0,
-                "needs_context": True,
-                "wellbeing_scenario": wellbeing_scenario,
-                "room": next(
-                    (name for name in _ROOMS if name in text),
-                    self.settings.agent_default_room,
-                ),
-            }
-        device = next((canonical for alias, canonical in _DEVICE_ALIASES if alias in text), "")
-        if not device or not self.might_be_home_request(text):
-            return {"route": "not_applicable", "device": device}
-        room = next((name for name in _ROOMS if name in text), "")
-        if "开关" in text and not any(word in text for word in ("打开", "开启", "关闭", "关掉")):
-            return {"route": "clarify", "device": device, "room": room}
-        if any(word in text for word in ("关闭", "关掉", "停止")):
-            action = "close"
-        elif any(word in text for word in ("播放", "来一首", "放一首", "听")):
-            action = "play"
-        elif "回充" in text:
-            action = "dock"
-        elif any(word in text for word in ("清扫", "扫地")):
-            action = "clean"
-        elif any(word in text for word in ("调到", "调成", "设为", "设置为", "调高", "调低", "调亮", "调暗")):
-            action = "set"
-        elif any(word in text for word in ("打开", "开启", "启动", "开")):
-            action = "open"
-        else:
-            action = "set"
-        needs_context = True
-        return {
-            "route": "contextual",
-            "device": device,
-            "room": room,
-            "action": action,
-            "risk_level": RiskLevel.L2 if device == "空调" else RiskLevel.L1,
-            "needs_context": needs_context,
-        }
+        return self._intent_handlers.resolve(
+            IntentContext(text=text, default_room=self.settings.agent_default_room)
+        )
 
     @staticmethod
     def _comfort_intent(text: str) -> str:
-        for name, markers, _device in _COMFORT_PATTERNS:
-            if any(marker in text for marker in markers):
-                return name
-        return ""
+        return find_comfort_intent(text)
 
     @staticmethod
     def _wellbeing_scenario(text: str) -> str:
-        for name, markers in _WELLBEING_PATTERNS:
-            if any(marker in text for marker in markers):
-                return name
-        return ""
+        return find_wellbeing_scenario(text)
 
     def _blocked(self, state: AgentState) -> dict[str, Any]:
         return {

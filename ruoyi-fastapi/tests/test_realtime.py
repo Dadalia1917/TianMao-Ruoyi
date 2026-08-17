@@ -1,17 +1,25 @@
 import asyncio
+from datetime import datetime, timezone
 
 import pytest
 
 from assistant_server.config import Settings
+from assistant_server.agent.schemas import AgentDecision, DecisionStatus, DeviceAction
 from assistant_server.realtime import (
     CapacityError,
     ConnectionLimiter,
+    Metrics,
+    PendingHomeAction,
+    RealtimeProxy,
+    WakeConversationState,
     build_session_update,
     classify_home_command_result,
     classify_home_confirmation,
     classify_upstream_connection_error,
     combine_home_commands,
     extract_confirmed_home_addition,
+    extract_pending_home_addition,
+    extract_pending_home_replacement,
     extract_wake_request,
     extract_home_control_command,
     is_probable_assistant_echo,
@@ -165,6 +173,39 @@ def test_confirmation_can_include_an_extra_home_request(transcript, expected):
     assert extract_confirmed_home_addition(transcript) == expected
 
 
+@pytest.mark.parametrize(
+    ("transcript", "expected"),
+    (
+        ("需要并且帮我打开一下空调", "帮我打开一下空调"),
+        ("需要，同时把空调设置为26度", "把空调设置为26度"),
+        ("顺便帮我打开风扇", "帮我打开风扇"),
+        ("另外再播放一首舒缓音乐", "播放一首舒缓音乐"),
+        ("改成打开空调", ""),
+        ("不要音乐，只要空调", ""),
+        ("打开空调", ""),
+    ),
+)
+def test_pending_proposal_preserves_additive_follow_up(transcript, expected):
+    assert extract_pending_home_addition(transcript) == expected
+
+
+@pytest.mark.parametrize(
+    ("transcript", "expected"),
+    (
+        ("改成帮我打开空调", "帮我打开空调"),
+        ("换成打开风扇", "打开风扇"),
+        ("不需要这个方案，改成帮我开空调", "帮我开空调"),
+        ("不需要，或者改成帮我开空调", "帮我开空调"),
+        ("不要音乐，但是打开空调", "打开空调"),
+        ("不需要", ""),
+        ("并且帮我打开空调", ""),
+        ("帮我打开空调", ""),
+    ),
+)
+def test_pending_proposal_replaces_only_on_explicit_replacement(transcript, expected):
+    assert extract_pending_home_replacement(transcript) == expected
+
+
 def test_compound_home_command_preserves_both_actions_for_tmall():
     command = combine_home_commands(
         "打开客厅空调并设置为26度强力模式",
@@ -173,6 +214,107 @@ def test_compound_home_command_preserves_both_actions_for_tmall():
 
     assert command == "打开客厅空调并设置为26度强力模式并且播放一首舒缓的轻音乐"
     assert "，" not in command
+
+
+def test_additive_replan_keeps_both_commands_until_final_confirmation():
+    class FakeAgent:
+        async def plan(self, request):
+            return AgentDecision(
+                request_id="request-extra",
+                execution_id="execution-extra",
+                status=DecisionStatus.EXECUTE,
+                user_message="建议打开空调并设置为26度。",
+                rationale="室外温度较高。",
+                action=DeviceAction(
+                    command="打开空调并设置为26度",
+                    device="空调",
+                    action="打开",
+                    parameters={"temperature_c": 26},
+                    requires_confirmation=True,
+                ),
+                created_at=datetime.now(timezone.utc),
+            )
+
+    class FakeWriter:
+        def __init__(self):
+            self.events = []
+
+        async def send(self, event):
+            self.events.append(event)
+
+    class FakeUpstream:
+        def __init__(self):
+            self.events = []
+
+        async def send(self, event):
+            self.events.append(event)
+
+    async def run():
+        settings = Settings.from_env()
+        writer = FakeWriter()
+        upstream = FakeUpstream()
+        wake_state = WakeConversationState(mode="awake")
+        base = PendingHomeAction(
+            command="打开客厅音乐播放器并播放舒缓音乐",
+            commands=["打开客厅音乐播放器并播放舒缓音乐"],
+            execution_id="execution-music",
+            message="建议播放舒缓音乐。",
+            rationale="用户有些疲劳。",
+            decision_basis=[],
+            evidence=[],
+            transcript="有点疲劳",
+        )
+        proxy = RealtimeProxy(
+            settings,
+            ConnectionLimiter(2, 1),
+            Metrics(),
+            None,
+            None,
+            FakeAgent(),
+        )
+
+        await proxy._plan_and_dispatch_home_command(
+            writer=writer,
+            upstream=upstream,
+            wake_state=wake_state,
+            transcript="帮我打开一下空调",
+            user_id="1",
+            session_id="session-test",
+            memory_context="",
+            confirmed_base_action=base,
+            submit_combined=False,
+        )
+
+        merged = wake_state.pending_home_action
+        assert merged is not None
+        assert merged.commands == [
+            "打开客厅音乐播放器并播放舒缓音乐",
+            "打开空调并设置为26度",
+        ]
+        assert any(
+            event.get("status") == "awaiting_confirmation"
+            for event in writer.events
+        )
+        assert not any(
+            event.get("type") == "assistant.home_command.pending"
+            for event in writer.events
+        )
+
+        await proxy._submit_home_action(
+            action=merged,
+            writer=writer,
+            upstream=upstream,
+            wake_state=wake_state,
+        )
+        pending_event = next(
+            event
+            for event in writer.events
+            if event.get("type") == "assistant.home_command.pending"
+        )
+        assert pending_event["commands"] == merged.commands
+        proxy._clear_pending_home_result(wake_state)
+
+    asyncio.run(run())
 
 
 @pytest.mark.parametrize(
@@ -194,6 +336,7 @@ def test_wake_prefixed_exit_can_be_interpreted_after_pending_restart_parse():
     ("status", "outcome", "message_fragment"),
     (
         ("accepted_unverified", "submitted", "已提交给天猫精灵"),
+        ("partially_accepted_unverified", "partial", "部分指令已提交"),
         ("rejected", "failed", "没有提交成功"),
         ("unknown", "failed", "没有提交成功"),
     ),

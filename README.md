@@ -70,7 +70,7 @@ uni-app 3 消费者端 ───┘               │
 
 | 版本 | 更新时间（UTC+8） | 框架/技术重点 | 版本定位 |
 | --- | --- | --- | --- |
-| **v1.1.2（当前）** | **2026.08.17** | Python 3.14、LangGraph、Qwen3.8-Max、T10S GenieApi | Agent 自由确认、多动作追加与有界智能选择正式版 |
+| **v1.1.2（当前）** | **2026.08.17** | Python 3.14、LangGraph、Qwen3.8-Max、T10S GenieApi | Agent 自由确认、多动作保序追加与有界智能选择正式版 |
 | v1.1.1 | 2026.08.14 20:04:17 | Qwen Function Calling、AudioWorklet、Provider 回执 | 情境 Agent、语音回灌抑制与真实提交回执版 |
 | v1.1.0 | 2026.08.14 18:22:47 | LangGraph StateGraph、Android ContentProvider | Agent 与 T10S 本机控制链路首个版本 |
 | v1.0.0 | 2026.08.11 | RuoYi、Vue 3、uni-app、FastAPI、Qwen3.5 Omni | 账号、语音、文字、记忆、运营后台和云端部署基线 |
@@ -90,15 +90,19 @@ uni-app 3 消费者端 ───┘               │
 
 - 放松、疲劳和压力等场景不再写死音乐或空调；Agent 根据家庭状态、天气、设备状态和上一方案，在当前合理的空调、风扇、音乐播放器中做有界智能选择。
 - 所有家电建议先询问是否执行。待确认阶段支持自然同意、拒绝、追加动作、修改或更换方案、提出新请求、重新呼喊“管家”以及结束对话。
-- 支持“执行，顺带放一首舒缓的音乐”等多动作追加；追加内容必须重新经过同一 Agent 的参数校验、风险白名单和二次确认状态机。
+- “需要并且……”“顺带……”“另外再……”及未带替换词的普通新设备请求均视为追加，保留原建议并重新确认；只有“改成/换成/只要/不需要原方案而是……”等明确替换语义才丢弃原建议，单独说“不需要”仍取消本轮。
+- 多动作以 `commands` 数组保留顺序，并由 T10S 逐条调用 `GenieApi / method=15`。例如原建议先播放音乐、用户再补充空调，最终确认后会先提交音乐、再提交空调；部分提交失败会如实返回部分接受，不伪报全部成功。
+- T10S 远场采集在非音乐状态使用有上限的自适应软件增益；检测到本机音乐播放时固定为 1.0，只保留系统 AEC/降噪，避免把扬声器音乐残声放大为新一轮输入。采样率和服务端 VAD 参数未改动。
+- Agent 意图预筛已从 `_analyze` 集中分支拆成按优先级注册的 `IntentHandlerRegistry`；默认健康风险、禁用设备、放松、舒适、身心状态、明确设备控制和兜底 Handler 可独立测试，新 Handler 注册后会自动参与入口发现和 LangGraph 路由，能力目录可从 `/api/v1/agent/capabilities` 查看。
+- 不实现第三方 APK 与天猫系统助手的“麦克风所有权交接”：`GenieApi / method=15` 仅用于文字指令提交，没有暂停/恢复系统热词监听的公开协议；本应用是普通 UID，Android 音频焦点也只管理播放，不能可靠控制特权助手录音。继续使用 Android 10 的系统录音优先级、现有 AEC/降噪和应用自身采集生命周期。
 - 执行、拒绝或结束后统一回到等待“管家”；Provider 接受只表述“已提交”，不伪报实体家电已经动作。
 - 团队本地数据库统一为 `127.0.0.1:3306/ry-cat / root / 123456`；公开 `.env` 已脱敏，生产密钥与模型 Key 仍由私有环境变量注入。
 
 #### 验收与产物
 
-- FastAPI：Python 3.14 环境下 `110 passed`；Docker Compose 配置、Python 3.14.6 Linux 镜像和云端健康检查均通过。
-- APK：`ruoyi-app/apk/天猫智家语音助手-v1.1.2.apk`，`versionCode=112`，1,621,555 字节，SHA-256 `9CE3F9F3993F43FD41E998BD165688BD6ACE7A19E08EBABD926FF33090F8E8BE`，v1/v2 签名有效。
-- T10S：`192.168.3.234:5555` 已覆盖安装并核验 `versionName=1.1.2`、`versionCode=112`。
+- FastAPI：Python 3.14 环境下 `129 passed`；Docker Compose 配置、Python 3.14.6 Linux 镜像和云端健康检查均通过。
+- APK：`ruoyi-app/apk/天猫智家语音助手-v1.1.2.apk`，`versionCode=112`，1,622,293 字节，SHA-256 `6BC2E4ADBC4422F6D3783E926F29FF3A07F2C5499B3683EF6010F3ECDC09E254`，v1/v2 签名有效。
+- T10S：`192.168.3.234:5555` 已覆盖安装并核验 `versionName=1.1.2`、`versionCode=112`、`lastUpdateTime=2026-08-17 12:30:51`。真机分别提交音乐和空调两条 Provider 指令后，音乐恢复播放；音乐播放期间遥测确认 `music=true`、软件增益 `1.00`。
 - 云端：`java-api`、`ai-gateway`、`web-gateway` 均为 v1.1.2；AI 网关实际运行 Python 3.14.6，数据库、记忆、文字对话和 Agent 全部 ready。
 - 回滚：云端只保留 `backups/rollback-v1.1.1-20260817-101501.tar.gz`，包内 `APP_VERSION=1.1.1` 已核验。
 
@@ -185,10 +189,11 @@ uni-app 3 消费者端 ───┘               │
 发布日期：**2026.08.17（UTC+8）**
 
 - 放松类场景从“写死音乐”改为有界智能选择：Agent 综合室内温湿度、室外天气、设备状态和上一轮方案，只在当前合理的空调、风扇、音乐播放器中做轻度随机选择；“换个方案”会避开上一方案。温度不适合时不会为了随机性强开空调或风扇。
-- 设备建议一律先询问是否执行。待确认阶段支持自然表达：同意、拒绝、同意并追加动作、修改/更换方案、直接提出新请求、重新说“管家”开始、说“结束对话”退出。追加动作通过同一 Agent 安全规划后，用“并且”组成一条天猫精灵内部命令。
+- 设备建议一律先询问是否执行。待确认阶段支持自然表达：同意、拒绝、同意并追加动作、修改/更换方案、直接提出新请求、重新说“管家”开始、说“结束对话”退出。“并且/顺带/另外再”及普通补充默认追加；只有明确说“改成/换成/只要/不需要原方案而是……”才替换，单独“不需要”则取消。
+- 追加动作通过同一 Agent 安全规划后，以有序 `commands` 数组下发；Android 逐条调用天猫精灵 Provider，避免复合长句被 Provider 只解析为最后一个设备动作。
 - 执行链仍为 `状态取证 → Qwen3.8-Max 规划 → 建议 → 用户确认 → T10S GenieApi / method=15 → 回执`；不使用 Home Assistant。执行、取消或结束后都回到等待“管家”，Provider 接受只播报“已提交”，不伪报实体设备成功。
-- FastAPI 在现有 YOLO Conda Python 3.14.4 下通过 `110 passed`；官方 `python:3.14.6-slim` AI 网关镜像构建成功，因此 Dockerfile 保留 3.14.6。YOLO 环境存在一条 LangChain Pydantic V1 兼容层警告，但不影响本轮测试；未改动该 Conda 环境。
-- H5/App 构建与 Android Release 成功。正式 APK 为 `ruoyi-app/apk/天猫智家语音助手-v1.1.2.apk`，`versionCode=112`，大小 1,621,555 字节，SHA-256 `9CE3F9F3993F43FD41E998BD165688BD6ACE7A19E08EBABD926FF33090F8E8BE`，v1/v2 签名有效；`192.168.3.234:5555` 已覆盖安装并确认 `MainActivity` 与进程正常，未擅自触发真实家电或音乐。
+- FastAPI 在现有 YOLO Conda Python 3.14.4 下通过 `129 passed`；官方 `python:3.14.6-slim` AI 网关镜像构建成功，因此 Dockerfile 保留 3.14.6。YOLO 环境存在一条 LangChain Pydantic V1 兼容层警告，但不影响本轮测试；未改动该 Conda 环境。
+- H5/App 构建与 Android Release 成功。正式 APK 为 `ruoyi-app/apk/天猫智家语音助手-v1.1.2.apk`，`versionCode=112`，大小 1,622,293 字节，SHA-256 `6BC2E4ADBC4422F6D3783E926F29FF3A07F2C5499B3683EF6010F3ECDC09E254`，v1/v2 签名有效；`192.168.3.234:5555` 已覆盖安装并确认 `MainActivity` 与进程正常。真机已验证两条 Provider 指令可按顺序分别提交，音乐在空调指令处理后恢复播放。
 - 正式云端 `120.55.64.225:/opt/tmall-smart-home` 已上传 v1.1.2 并完成三镜像构建/切换；AI 网关实际为 Python 3.14.6，内部健康检查返回 `version=1.1.2`、数据库/记忆/文字对话/Agent 全部 ready，T10S 实时 WebSocket 已重连。云端只保留经包内 `APP_VERSION=1.1.1` 核验的 `backups/rollback-v1.1.1-20260817-101501.tar.gz`，可回滚 Python 3.11 与旧服务。`139.196.94.58:/opt/tmall-genie-ai` 仅为旧 DeepSeek Webhook，本轮未改动。
 
 ---
@@ -1195,8 +1200,8 @@ npm run dev
 - 最低系统：Android 6.0（API 23）
 - 已验收设备：天猫精灵智慧屏 T10S，Android 10、1280×800 横屏、arm64-v8a
 - 当前正式安装包：`ruoyi-app/apk/天猫智家语音助手-v1.1.2.apk`
-- 当前本地、T10S 与云端源码归档包版本/哈希：`versionCode=112`；SHA-256 `9CE3F9F3993F43FD41E998BD165688BD6ACE7A19E08EBABD926FF33090F8E8BE`
-- 覆盖安装结果：T10S `192.168.3.234:5555` 返回 `Success`，包版本与进程状态正常；未发送真实音乐或家电动作测试指令
+- 当前本地与 T10S 正式包版本/哈希：`versionCode=112`；SHA-256 `6BC2E4ADBC4422F6D3783E926F29FF3A07F2C5499B3683EF6010F3ECDC09E254`
+- 覆盖安装结果：T10S `192.168.3.234:5555` 返回 `Success`，`lastUpdateTime=2026-08-17 12:30:51`；音乐、空调两条 Provider 指令的保序提交以及音乐播放期间增益锁定均已真机验证
 - 拉起方式：Launcher Activity 或 `smartbutler://voice`
 
 签名密钥位于本机忽略目录，不进入 Git、Docker 构建上下文或云服务器。重新构建时使用 Android Studio 自带 JBR 和 `D:\Android-SDK`。当前仓库未提交 Gradle Wrapper，需从 Android Studio 执行 Gradle 任务，或使用本机兼容的 Gradle 9.6.1 运行 `clean assembleRelease`；后续建议补交 Wrapper 以固定构建版本。
@@ -1324,6 +1329,7 @@ smartbutler://voice
 - Java 认证结果支持短时缓存，但 Token 的权威来源仍是 RuoYi。
 - FastAPI 不依赖 Java 内部类；只通过 <code>/getInfo</code> 和共享的数据模型边界协作。
 - Agent 已作为独立编排层接入，正式设备控制协议仍留在 Android 原生桥并调用天猫精灵内部 `GenieApi`；任何未来传感器/网关只作为可选状态适配器，不替换当前控制协议，也不把设备协议写进音频代理核心。
+- Agent 入口分流使用可注册的优先级 Handler；LangGraph 只负责稳定的规划、取证和校验主流程。添加新情境时优先新增独立 Handler 并注册，不再扩张 `_analyze` 条件链。
 - 温湿度、照度、占用和设备状态存放在带 TTL 的 Redis 短时状态中，不写入对话历史；多 Worker 读取一致，过期值不会作为实时事实参与决策。
 
 生产扩容建议：
@@ -1433,7 +1439,7 @@ npm run build:prod
 | 产品/服务/APK | v1.1.2 |
 | 云端状态 | 正式 120 服务器的 Java、FastAPI、Web 网关均为 v1.1.2；Python 3.14.6；内部健康检查 ready |
 | T10S | 已安装签名 v1.1.2（versionCode 112）；包名 `com.jpx.tmallsmarthome` |
-| 语音与 Agent 联动正式包 | `versionCode=112`，SHA-256 `9CE3F9F3993F43FD41E998BD165688BD6ACE7A19E08EBABD926FF33090F8E8BE`；本地与 T10S 已更新 |
+| 语音与 Agent 联动正式包 | `versionCode=112`，SHA-256 `6BC2E4ADBC4422F6D3783E926F29FF3A07F2C5499B3683EF6010F3ECDC09E254`；本地与 T10S 已更新 |
 | 家电控制 | T10S 天猫精灵内部 `GenieApi / method=15` 文字指令；不依赖 Home Assistant |
 | 数据库 | v1.1.2 无 MySQL 迁移；短时家庭状态继续使用 Redis |
 | 后续边界 | 可选接入传感器/网关补充物理状态反馈，不替换现有天猫精灵控制通道 |
@@ -1484,4 +1490,4 @@ npm run build:prod
 
 **当前文档基线：天猫智家 v1.1.2 · 2026 年 8 月 17 日（UTC+8）**
 
-**当前构建状态：v1.1.2 已完成 FastAPI 110 项测试、H5/App、Android Release、v1/v2 签名、T10S 覆盖安装与阿里云部署；云端 AI 网关运行 Python 3.14.6。正式控制通道仍是天猫精灵内部 `GenieApi / method=15`，所有 Agent 家电建议必须经用户确认。**
+**当前构建状态：v1.1.2 已完成 FastAPI 129 项测试、H5/App、Android Release、v1/v2 签名、T10S 覆盖安装与阿里云部署；云端 AI 网关运行 Python 3.14.6。正式控制通道仍是天猫精灵内部 `GenieApi / method=15`，所有 Agent 家电建议必须经用户确认；追加动作会保序逐条提交。**

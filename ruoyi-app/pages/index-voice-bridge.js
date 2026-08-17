@@ -36,18 +36,27 @@
         captureTrackSettings: {},
         captureFrames: 0,
         captureDroppedFrames: 0,
-        captureDiagnosticAt: 0
+        captureDiagnosticAt: 0,
+        captureInputRms: 0,
+        captureInputPeak: 0,
+        captureGain: 1,
+        musicPlaybackActive: false,
+        musicStateTimer: null
       }
     },
     mounted() {
       this.foregroundHandler = () => this.resumeAfterNativeForeground()
       window.addEventListener('tmallAppForeground', this.foregroundHandler)
+      this.refreshMusicPlaybackState()
+      this.musicStateTimer = setInterval(() => this.refreshMusicPlaybackState(), 2000)
     },
     beforeDestroy() {
       if (this.foregroundHandler) {
         window.removeEventListener('tmallAppForeground', this.foregroundHandler)
       }
       this.foregroundHandler = null
+      if (this.musicStateTimer) clearInterval(this.musicStateTimer)
+      this.musicStateTimer = null
     },
     methods: {
       async resumeAfterNativeForeground() {
@@ -390,6 +399,9 @@
         this.captureFrames = 0
         this.captureDroppedFrames = 0
         this.captureDiagnosticAt = 0
+        this.captureInputRms = 0
+        this.captureInputPeak = 0
+        this.captureGain = 1
         const audioTrack = stream.getAudioTracks()[0]
         this.captureTrackSettings = audioTrack && typeof audioTrack.getSettings === 'function'
           ? audioTrack.getSettings()
@@ -482,7 +494,8 @@
           this.sendAudioDiagnostics('backpressure')
           return
         }
-        const pcm = this.downsampleToPcm16(input, inputRate, TARGET_INPUT_RATE)
+        const enhancedInput = this.enhanceFarFieldFrame(input)
+        const pcm = this.downsampleToPcm16(enhancedInput, inputRate, TARGET_INPUT_RATE)
         if (!pcm.length) return
         this.captureFrames += 1
         this.socket.send(JSON.stringify({
@@ -490,6 +503,56 @@
           audio: this.bytesToBase64(new Uint8Array(pcm.buffer))
         }))
         this.sendAudioDiagnostics('periodic')
+      },
+      enhanceFarFieldFrame(input) {
+        if (!input || !input.length) return input
+        let squareSum = 0
+        let peak = 0
+        for (let index = 0; index < input.length; index += 1) {
+          const sample = Number(input[index] || 0)
+          squareSum += sample * sample
+          peak = Math.max(peak, Math.abs(sample))
+        }
+        const rms = Math.sqrt(squareSum / input.length)
+        // Android dumpsys confirms that T10S enables AEC and NS for the
+        // VOICE_COMMUNICATION source, but exposes no actual AGC effect. Apply
+        // only a bounded post-AEC gain to quiet far-field speech. Loud music,
+        // close speech and near-silence are not boosted.
+        if (this.musicPlaybackActive) {
+          this.captureGain = 1
+          this.captureInputRms = rms
+          this.captureInputPeak = peak
+          return input
+        }
+        let targetGain = 1
+        if (rms >= 0.0008 && rms < 0.045 && peak < 0.72) {
+          targetGain = Math.min(2.4, Math.max(1, 0.045 / rms))
+        }
+        this.captureGain = Math.max(
+          1,
+          Math.min(2.4, (Number(this.captureGain || 1) * 0.82) + (targetGain * 0.18))
+        )
+        this.captureInputRms = rms
+        this.captureInputPeak = peak
+        if (this.captureGain < 1.02) return input
+
+        const output = new Float32Array(input.length)
+        for (let index = 0; index < input.length; index += 1) {
+          const amplified = Number(input[index] || 0) * this.captureGain
+          output[index] = Math.max(-0.96, Math.min(0.96, amplified))
+        }
+        return output
+      },
+      refreshMusicPlaybackState() {
+        try {
+          this.musicPlaybackActive = Boolean(
+            window.GenieBridge &&
+            typeof window.GenieBridge.isMusicActive === 'function' &&
+            window.GenieBridge.isMusicActive()
+          )
+        } catch (error) {
+          this.musicPlaybackActive = false
+        }
       },
       sendAudioDiagnostics(phase, force = false) {
         if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return
@@ -508,6 +571,10 @@
             echo_cancellation: Boolean(track.echoCancellation),
             noise_suppression: Boolean(track.noiseSuppression),
             auto_gain_control: Boolean(track.autoGainControl),
+            input_rms_x10000: Math.round(Number(this.captureInputRms || 0) * 10000),
+            input_peak_x10000: Math.round(Number(this.captureInputPeak || 0) * 10000),
+            software_gain_x100: Math.round(Number(this.captureGain || 1) * 100),
+            music_playback_active: Boolean(this.musicPlaybackActive),
             frames: this.captureFrames,
             dropped_frames: this.captureDroppedFrames,
             socket_buffered_bytes: Number(this.socket.bufferedAmount || 0)
@@ -538,6 +605,9 @@
         this.captureContext = null
         this.captureProcessorMode = ''
         this.captureTrackSettings = {}
+        this.captureInputRms = 0
+        this.captureInputPeak = 0
+        this.captureGain = 1
       },
       setMuted(value) {
         this.muted = value
@@ -570,9 +640,17 @@
           }))
         } catch (error) {}
       },
-      executeHomeCommand(event) {
-        const command = String((event && event.command) || '').trim()
-        if (!command || !this.hasGenieProvider()) {
+      async executeHomeCommand(event) {
+        const requestedCommands = Array.isArray(event && event.commands)
+          ? event.commands
+          : [(event && event.command) || '']
+        const commands = []
+        requestedCommands.forEach((item) => {
+          const value = String(item || '').trim()
+          if (value && !commands.includes(value) && commands.length < 4) commands.push(value)
+        })
+        const command = commands.join('；')
+        if (!commands.length || !this.hasGenieProvider()) {
           const message = '当前设备未提供天猫精灵本机控制通道'
           this.sendHomeCommandResult(event, 'rejected', message, command)
           this.emit({
@@ -599,35 +677,52 @@
           decisionBasis: (event && event.decision_basis) || [],
           evidence: (event && event.evidence) || []
         })
+        const acceptedCommands = []
+        let activeCommand = ''
         try {
-          const rawResult = window.GenieBridge.sendToGenie(command)
-          const result = typeof rawResult === 'string' ? JSON.parse(rawResult) : rawResult
-          if (!result || result.accepted !== true) {
-            throw new Error((result && result.message) || '天猫精灵未接受该指令')
+          for (let index = 0; index < commands.length; index += 1) {
+            activeCommand = commands[index]
+            if (index > 0) {
+              // Give the T10S internal recognizer a short gap so one utterance
+              // cannot overwrite the previous item in a multi-action plan.
+              await new Promise(resolve => setTimeout(resolve, 650))
+            }
+            const rawResult = window.GenieBridge.sendToGenie(activeCommand)
+            const result = typeof rawResult === 'string' ? JSON.parse(rawResult) : rawResult
+            if (!result || result.accepted !== true) {
+              throw new Error((result && result.message) || '天猫精灵未接受该指令')
+            }
+            acceptedCommands.push(activeCommand)
           }
           this.sendHomeCommandResult(
             event,
             'accepted_unverified',
-            result.message || '指令已提交给天猫精灵',
+            `${acceptedCommands.length} 项指令已分别提交给天猫精灵`,
             command
           )
           this.emit({
             type: 'home.command.accepted',
             command,
-            message: result.message || '指令已提交给天猫精灵'
+            commands: acceptedCommands,
+            message: `${acceptedCommands.length} 项指令已分别提交给天猫精灵`
           })
         } catch (error) {
+          const partial = acceptedCommands.length > 0
+          const message = partial
+            ? `已提交 ${acceptedCommands.length} 项，但“${activeCommand}”提交失败：${error.message || error}`
+            : `家居指令提交失败：${error.message || error}`
           this.sendHomeCommandResult(
             event,
-            'rejected',
-            `家居指令提交失败：${error.message || error}`,
+            partial ? 'partially_accepted_unverified' : 'rejected',
+            message,
             command
           )
           this.resetAcousticRelay()
           this.emit({
             type: 'home.command.failed',
             command,
-            message: `家居指令提交失败：${error.message || error}`
+            commands: acceptedCommands,
+            message
           })
         }
       },

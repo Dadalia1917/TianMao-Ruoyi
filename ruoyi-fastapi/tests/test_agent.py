@@ -9,7 +9,8 @@ from assistant_server.agent import (
     HouseholdStateUpdate,
 )
 from assistant_server.agent.state import HouseholdStateStore
-from assistant_server.agent.schemas import DecisionStatus, Evidence
+from assistant_server.agent.handlers import IntentContext
+from assistant_server.agent.schemas import DecisionStatus, Evidence, RiskLevel
 from assistant_server.config import Settings
 
 
@@ -320,6 +321,54 @@ def test_health_alert_only_triggers_emergency_notice(monkeypatch):
     assert decision.status == DecisionStatus.ADVISE
     assert decision.action is None
     assert "120" in decision.user_message
+
+
+def test_health_handler_priority_wins_over_device_action(monkeypatch):
+    decision = run_plan(
+        build_agent(monkeypatch),
+        AgentRequest(transcript="我胸痛，顺便打开空调", user_id="1"),
+    )
+
+    assert decision.status == DecisionStatus.ADVISE
+    assert decision.action is None
+    assert "120" in decision.user_message
+
+
+class MovieNightIntentHandler:
+    name = "movie_night"
+    priority = 850
+
+    def matches(self, context: IntentContext) -> bool:
+        return "观影模式" in context.text
+
+    def accepts_as_entrypoint(self, context: IntentContext) -> bool:
+        return self.matches(context)
+
+    def analyze(self, context: IntentContext):
+        return {
+            "route": "clarify",
+            "device": "投影仪",
+            "room": "客厅",
+            "risk_level": RiskLevel.L1,
+        }
+
+
+def test_registered_intent_handler_is_discovered_and_routed(monkeypatch):
+    agent = build_agent(monkeypatch)
+    agent.register_intent_handler(MovieNightIntentHandler())
+
+    assert agent.might_be_home_request("进入观影模式")
+    decision = run_plan(
+        agent,
+        AgentRequest(transcript="进入观影模式", user_id="1"),
+    )
+
+    assert decision.status == DecisionStatus.CLARIFY
+    assert "客厅投影仪" in decision.user_message
+    catalog = agent.intent_handler_catalog()
+    names = [item["name"] for item in catalog]
+    assert names[:3] == ["health_alert", "unsafe_device", "movie_night"]
+    assert names[-1] == "not_applicable"
 
 
 def test_negated_feeling_does_not_enter_agent(monkeypatch):

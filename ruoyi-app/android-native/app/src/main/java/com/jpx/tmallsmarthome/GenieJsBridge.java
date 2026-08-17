@@ -1,6 +1,7 @@
 package com.jpx.tmallsmarthome;
 
 import android.content.Context;
+import android.media.AudioManager;
 import android.webkit.JavascriptInterface;
 
 import org.json.JSONException;
@@ -21,6 +22,13 @@ public final class GenieJsBridge {
         // 能力协商只表示原生桥已安装。provider 的最终可用性由真实 insert
         // 决定，不能用 resolveContentProvider() 的可见性结果提前否决。
         return GenieCommand.isAvailable(appContext);
+    }
+
+    @JavascriptInterface
+    public boolean isMusicActive() {
+        AudioManager audioManager =
+                (AudioManager) appContext.getSystemService(Context.AUDIO_SERVICE);
+        return audioManager != null && audioManager.isMusicActive();
     }
 
     @JavascriptInterface

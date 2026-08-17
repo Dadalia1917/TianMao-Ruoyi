@@ -2,17 +2,17 @@
 
 **产品版本：v1.1.2 · 文档更新时间：2026.08.17（UTC+8）**
 
-> 发布状态（2026.08.17）：v1.1.2 Agent 自然确认与多方案放松逻辑已完成；现有 YOLO Conda Python 3.14.4 下 `110 passed`。正式阿里云 `ai-gateway:1.1.2` 已运行官方 Python 3.14.6，内部 `/health/ready` 返回 `version=1.1.2`，数据库、记忆、文字对话和 household Agent 均 ready；T10S 实时连接已恢复。
+> 发布状态（2026.08.17）：v1.1.2 Agent 自然确认、多动作保序追加、明确替换语义与意图 Handler 注册表已完成；现有 YOLO Conda Python 3.14.4 下 `129 passed`。正式阿里云 `ai-gateway:1.1.2` 已运行官方 Python 3.14.6，内部 `/health/ready` 返回 `version=1.1.2`，数据库、记忆、文字对话和 household Agent 均 ready；T10S 实时连接已恢复。
 
 > 控制边界：确认后的命令继续由 T10S 天猫精灵内部 `GenieApi / method=15` 执行，不接入也不依赖 Home Assistant。Provider 接受只表示已提交。正式服务器是 `120.55.64.225`；`139.196.94.58` 只是旧 DeepSeek Webhook，禁止覆盖。
 
 完整的软件说明、技术栈、UML、ER 图、接口总表和部署指南请阅读仓库根目录 `README.md`。
 
-当前版本负责已登录用户的实时语音对话、六模型文字对话、自动续接、账号长期记忆和智能家居 Agent。v1.1.2 使用 LangGraph 单总控、`qwen3.8-max` Function Calling、确定性安全策略与环境工具，把低风险计划转换为待确认事件；疲劳、压力和想放松先建议休息、补水，再按室内状态、室外天气和上一轮方案，从当前合理的空调、风扇、音乐播放器中做轻度随机选择。用户可自然同意、拒绝、追加动作、换方案、发起新请求、重新唤醒或结束对话；只有最终确认的明确命令才由 T10S Android 提交。Home Assistant 当前未接入且不是控制前置条件；未来的传感器或网关只作为可选状态来源。
+当前版本负责已登录用户的实时语音对话、六模型文字对话、自动续接、账号长期记忆和智能家居 Agent。v1.1.2 使用 LangGraph 单总控、`qwen3.8-max` Function Calling、确定性安全策略与环境工具，把低风险计划转换为待确认事件；疲劳、压力和想放松先建议休息、补水，再按室内状态、室外天气和上一轮方案，从当前合理的空调、风扇、音乐播放器中做轻度随机选择。用户可自然同意、拒绝、追加动作、换方案、发起新请求、重新唤醒或结束对话；“并且/顺带/另外再”以及没有替换词的设备补充都保留原方案，只有“改成/换成/只要/不需要原方案而是……”才替换，单独“不需要”取消本轮。最终确认后以有序 `commands` 数组交给 T10S Android 逐条提交。Home Assistant 当前未接入且不是控制前置条件；未来的传感器或网关只作为可选状态来源。
 
 ## 一键启动
 
-本机默认使用现有 `C:\Users\29556\.conda\envs\yolo\python.exe`（Python 3.14.4）测试，不再为普通回归临时创建环境。Docker 固定到官方 `python:3.14.6-slim`；本轮依赖安装、镜像构建及 `110 passed` 均通过。线上若出现 3.14 特有问题，回滚基础镜像到 Python 3.11。
+本机默认使用现有 `C:\Users\29556\.conda\envs\yolo\python.exe`（Python 3.14.4）测试，不再为普通回归临时创建环境。Docker 固定到官方 `python:3.14.6-slim`；本轮依赖安装、镜像构建及 `129 passed` 均通过。线上若出现 3.14 特有问题，回滚基础镜像到 Python 3.11。
 
 ```powershell
 cd E:\无锡捷普迅智能科技有限公司\天猫精灵\天猫精灵安卓APK\RuoYi\ruoyi-fastapi
@@ -71,7 +71,7 @@ python main.py
 
 - 服务端语义 VAD，自然判断用户说话结束；
 - 用户开口时取消当前回复并清空播放队列，实现打断；
-- 回声消除、降噪、自动增益；
+- 系统回声消除和降噪；非音乐状态启用有上限的远场软件增益，检测到 T10S 正在播放音乐时固定增益为 1.0，避免放大残余扬声器回声；
 - 硬唤醒状态机：建连后默认休眠，只有句首“管家”才能创建模型回复；“天猫管家”“曼巴管家”等旧口令不再通过门控，休眠期间的其他转写会被删除，不写入对话上下文或历史；
 - 单独呼喊“管家”固定回答“我在，有什么需要？”，后接具体问题时直接回答问题；
 - 已唤醒时识别“你可以退下了”“我不想跟你说话了”“结束对话”“先这样吧”“再见”等明确结束语，简短回应后回到休眠，下一轮必须重新唤醒；
@@ -144,11 +144,11 @@ APP 的可回看历史默认保存在设备本地并按 RuoYi 用户 ID 分区�
 
 ## 智能家居 Agent
 
-v1.1.1 继续把 Agent 作为 FastAPI 内部独立模块，代码位于 `assistant_server/agent/`。架构采用一个 LangGraph 总控 Agent 和少量有边界的工具，规划模型固定为 `qwen3.8-max`；普通语音仍由 Qwen3.5 Omni 实时处理。
+v1.1.2 继续把 Agent 作为 FastAPI 内部独立模块，代码位于 `assistant_server/agent/`。意图入口位于 `handlers.py`，由 `IntentHandlerRegistry` 按优先级选择健康风险、禁用设备、放松、舒适、身心状态、明确设备控制或兜底 Handler；LangGraph 总控图继续负责规划、环境取证与最终校验，规划模型固定为 `qwen3.8-max`，普通语音仍由 Qwen3.5 Omni 实时处理。新增情境可实现 `IntentHandler` 并调用 `register_intent_handler()` 注册，无需修改 `_analyze` 条件链；当前 Handler 名称和优先级通过 `/api/v1/agent/capabilities` 返回。
 
 ```text
 Omni 最终转写
-  -> 家居意图预筛（普通聊天仍走实时直连）
+  -> IntentHandler 优先级注册表（普通聊天仍走实时直连）
   -> LangGraph：分析 -> 风险/澄清/环境规划 -> 最终校验
   -> 天气工具或模拟照度工具
   -> Qwen3.8-Max Function Calling 提交严格 ModelPlan/WellbeingAdvice

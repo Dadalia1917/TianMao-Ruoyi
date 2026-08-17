@@ -6,6 +6,7 @@ from .schemas import (
     HouseholdStateSnapshot,
     HouseholdStateUpdate,
 )
+from .handlers import IntentContext, IntentHandler
 from .service import HouseholdAgentService
 
 __all__ = [
@@ -14,4 +15,6 @@ __all__ = [
     "HouseholdAgentService",
     "HouseholdStateSnapshot",
     "HouseholdStateUpdate",
+    "IntentContext",
+    "IntentHandler",
 ]
