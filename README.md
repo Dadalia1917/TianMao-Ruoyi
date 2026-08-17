@@ -10,7 +10,7 @@
 | English name | Tmall Smart Home Qwen Voice Assistant |
 | 产品版本 | **v1.1.1** |
 | 版本更新时间 | **2026 年 8 月 14 日 20:04:17（UTC+8）** |
-| 文档交接更新时间 | **2026 年 8 月 14 日 20:04:17（UTC+8）** |
+| 文档交接更新时间 | **2026 年 8 月 17 日 09:49:28（UTC+8）** |
 | 当前阶段 | v1.1.1 联动版已发布：AI-Agent 音乐放松场景与语音采集/回灌保护已合并，T10S 和阿里云均已更新并验收 |
 | 适用终端 | 天猫智慧工控屏、Android、桌面 H5 |
 | 开发单位 | 无锡捷普迅智能科技有限公司 |
@@ -18,8 +18,31 @@
 
 > 版本说明：**v1.1.1 是本产品版本**；Maven 和 ruoyi-ui 中的 3.9.2 是继承的 RuoYi 工程/依赖版本，两者含义不同，不应互相替换。
 
+## 核心技术架构
+
+本仓库不是单一的 Java 后台，而是由 Vue 3 运营端、uni-app 消费者端、Spring Boot 业务后端和 FastAPI AI 服务共同组成的完整应用：
+
+| 子系统 | 代码目录 | 核心技术 | 主要职责 |
+| --- | --- | --- | --- |
+| 运营管理前端 | `ruoyi-ui/` | **Vue 3.5.26**、Vite 6.4.3、Element Plus 2.13.1、Pinia 3、Axios | 用户、权限、语音会话、长期记忆和运营数据管理 |
+| 消费者端 App/H5 | `ruoyi-app/` | **uni-app 3、Vue 3.4.21**、Vite 5.2.8、Pinia 2.1.7、Android WebView/原生桥 | Android、天猫智慧工控屏与 H5 的登录、实时语音、文字聊天和本机家居控制 |
+| Java 业务后端 | `ruoyi-admin/`、`ruoyi-framework/`、`ruoyi-system/`、`ruoyi-common/` | **Java 26、Spring Boot 4.0.6**、Spring Security、MyBatis Starter 4.0.1、Druid | 账号认证、RBAC 权限、运营接口、会话与长期记忆数据管理 |
+| AI 语音与 Agent 服务 | `ruoyi-fastapi/` | **FastAPI 0.115+、LangGraph 1.x StateGraph**、Pydantic 2、Uvicorn、WebSocket、HTTPX | Qwen3.5 Omni 实时语音代理、文字模型路由、Agent 工具编排、安全校验和记忆提取 |
+| 数据与部署 | `sql/`、`ruoyi-docker/` | MySQL 8、Redis 6、Docker Compose、Caddy 2 | 数据持久化、Token 缓存、容器编排、HTTPS/WSS 与反向代理 |
+
+~~~text
+Vue 3 运营后台 ───────┐
+                      ├─> Spring Boot 4.0.6 业务后端 ──> MySQL / Redis
+uni-app 3 消费者端 ───┘               │
+        │                              └─> FastAPI AI 网关 ──> LangGraph Agent
+        └─ WebSocket 实时语音 ────────────────┘                └─> Qwen / DeepSeek / T10S
+~~~
+
+> Java 版本说明：当前开发运行环境使用 **JDK 26.0.1**。Maven `pom.xml` 与生产 Docker 镜像仍保留 Java 17 字节码/运行时兼容配置；如要让构建产物仅面向 Java 26，应同步调整 Maven 编译目标和 Docker 基础镜像后再执行完整回归测试。
+
 ## 文档导航
 
+- [核心技术架构](#核心技术架构)
 - [v1.1.0 更新说明](#1-v110-更新说明)
 - [v1.1.1 发布说明与验收](#13-v111-发布说明与验收)
 - [软件说明与需求](#2-软件说明)
@@ -814,13 +837,13 @@ erDiagram
 
 | 层级 | 技术 | 当前版本/说明 |
 | --- | --- | --- |
-| 消费者端 | uni-app、Vue 3、Android Studio WebView 容器 | H5 与 Android 正式 APK；原生 `addJavascriptInterface` 桥 |
+| 消费者端 | uni-app 3、Vue 3、Vite、Pinia、Android Studio WebView 容器 | Vue 3.4.21、Vite 5.2.8；H5 与 Android 正式 APK；原生 `addJavascriptInterface` 桥 |
 | T10S 本机控制 | Android `ContentResolver`、天猫精灵导出 Provider | `GenieApi`，文字识别方法 `15`；仅低风险白名单 |
 | 浏览器音频 | Web Audio API、WebSocket | PCM 16-bit 单声道；输入 16kHz，输出 24kHz |
 | 运营后台 | Vue 3、Vite、Element Plus、Pinia、Axios、ECharts | Vue 3.5.26、Vite 6.4.3、Element Plus 2.13.1 |
-| Java 服务 | Java、Spring Boot、Spring Security、MyBatis、Druid | Java 17、Spring Boot 4.0.6、MyBatis Starter 4.0.1 |
+| Java 服务 | Java、Spring Boot、Spring Security、MyBatis、Druid | 当前开发运行 JDK 26.0.1；Spring Boot 4.0.6、MyBatis Starter 4.0.1 |
 | AI 网关 | Python、FastAPI、Uvicorn、websockets、httpx、aiomysql | 推荐 Python 3.11/3.12；Docker 使用 Python 3.11；FastAPI 0.115+ |
-| 智能家居 Agent | LangGraph StateGraph、Pydantic、Qwen Function Calling | 单总控 + 有界工具；天气实时数据 + 模拟照度；确定性安全校验 |
+| 智能家居 Agent | LangGraph 1.x StateGraph、Pydantic 2、Qwen Function Calling | 单总控 + 有界工具；天气实时数据 + 模拟照度；确定性安全校验 |
 | 实时模型 | Qwen3.5 Omni Realtime | qwen3.5-omni-plus-realtime，默认音色 Ethan |
 | Agent 规划模型 | Qwen3.8-Max | `qwen3.8-max`；当前百炼账号 Function Calling 已实测 |
 | 文字模型 | Qwen / DeepSeek | 6 个可配置模型 |
@@ -952,7 +975,7 @@ Content-Type: application/json
 
 ### 13.1 环境要求
 
-- JDK 17
+- JDK 26（当前开发环境为 26.0.1；Maven 与 Docker 的 Java 17 兼容目标见上文版本说明）
 - Maven 3.9+
 - MySQL 8.0+
 - Redis 6.0+
@@ -1181,6 +1204,7 @@ smartbutler://voice
 - Provider 能力由 Android 客户端握手声明；服务端检测和原生桥白名单构成两层校验，高风险指令不下发也不提交。
 - 当前接口没有设备状态回执，`accepted=true` 只代表本机调用已提交，不能作为设备执行成功凭据。
 - AI 回答可能不准确，客户端保留必要的生成内容提示。
+- `ruoyi-app/manifest.json` 中的微信 `appid` 是 uni-app 模板自带的客户端应用标识，当前业务未使用微信 AppSecret 或对应的服务端微信 API。GitHub Secret Scanning 可能对该 AppID 发出提示；这不等同于 AppSecret 泄露，可按项目实际使用情况审查告警，但任何 AppSecret 都不得提交到仓库。
 
 ---
 
@@ -1288,7 +1312,7 @@ npm run build:prod
 
 ---
 
-## 20. License 与第三方服务
+## 20. License、第三方服务与致谢
 
 本项目是面向公司业务的 RuoYi 派生工程。正式发布前，请由项目负责人确认：
 
@@ -1296,6 +1320,16 @@ npm run build:prod
 - 阿里云百炼模型服务条款、计费、地域和数据处理规则；
 - 天猫精灵技能平台与 Android 终端的发布要求；
 - 公司自有代码、品牌素材和隐私政策的授权范围。
+
+### 20.1 致谢与参考
+
+本项目站在优秀开源工程与开放平台文档的肩膀上，在此特别致谢：
+
+- [RuoYi-Vue](https://gitee.com/y_project/RuoYi-Vue) 与 [RuoYi 官方文档](https://doc.ruoyi.vip/ruoyi-vue/)：为本项目提供成熟的 Spring Boot、Spring Security、MyBatis、RBAC 权限体系和前后端分离工程基础。
+- [RuoYi-App](https://gitee.com/y_project/RuoYi-App) 与 [RuoYi-App 官方文档](https://doc.ruoyi.vip/ruoyi-app/)：为 uni-app 多端应用、登录鉴权和移动端工程组织提供重要参考。
+- [天猫精灵 AI 平台开发文档](https://aligenie.com/docs/ai/home) 与 [天猫精灵技能应用平台开发文档](https://aligenie.com/doc/20255408)：为天猫精灵终端、Android 应用、语音能力、设备能力与发布验收流程提供规范和实现参考。
+
+感谢 RuoYi 社区与天猫精灵开放平台开发者文档的持续建设。本项目中的业务扩展、AI Agent、实时语音链路和 T10S 本机控制适配由本项目团队独立实现；上述致谢不代表原项目或平台对本项目提供商业背书。
 
 ---
 
