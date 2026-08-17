@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 import re
 import uuid
 from datetime import datetime
@@ -116,6 +117,7 @@ _WELLBEING_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 _RELAXATION_SCENARIOS = {"fatigue", "stress"}
+_RELAXATION_DEVICES = ("空调", "风扇", "音乐播放器")
 
 _HEALTH_ALERTS = (
     "胸痛", "胸口剧痛", "呼吸困难", "喘不上气", "无法呼吸", "昏倒", "昏厥",
@@ -151,6 +153,7 @@ class AgentState(TypedDict, total=False):
     used_function_calling: bool
     comfort_intent: str
     wellbeing_scenario: str
+    allowed_devices: tuple[str, ...]
     decision: AgentDecision
 
 
@@ -163,6 +166,7 @@ class HouseholdAgentService:
         self.ready = False
         self._client: httpx.AsyncClient | None = None
         self._data_tools: HouseholdDataTools | None = None
+        self._rng = random.SystemRandom()
         self._state_store = HouseholdStateStore(
             ttl_seconds=settings.agent_household_state_ttl_seconds,
             redis_host=settings.agent_state_redis_host,
@@ -351,13 +355,17 @@ class HouseholdAgentService:
         if wellbeing_scenario in _RELAXATION_SCENARIOS:
             return {
                 "route": "contextual",
-                "device": "音乐播放器",
-                "room": "",
-                "action": "play",
-                "risk_level": RiskLevel.L1,
+                "device": "",
+                "room": next(
+                    (name for name in _ROOMS if name in text),
+                    self.settings.agent_default_room,
+                ),
+                "action": "recommend",
+                "risk_level": RiskLevel.L2,
                 "needs_context": True,
-                "comfort_intent": "relax_music",
+                "comfort_intent": "relax",
                 "wellbeing_scenario": wellbeing_scenario,
+                "allowed_devices": _RELAXATION_DEVICES,
             }
         comfort_intent = self._comfort_intent(text)
         if comfort_intent:
@@ -517,7 +525,11 @@ class HouseholdAgentService:
                     "tools": self._tool_definitions(),
                     "tool_choice": "auto",
                     "enable_thinking": False,
-                    "temperature": 0.1,
+                    "temperature": (
+                        0.35
+                        if state.get("wellbeing_scenario") in _RELAXATION_SCENARIOS
+                        else 0.1
+                    ),
                     "max_tokens": 900,
                 }
                 response = await self._client.post(
@@ -726,20 +738,6 @@ class HouseholdAgentService:
 
     def _validate(self, state: AgentState) -> dict[str, Any]:
         plan = state["model_plan"]
-        device = state["device"]
-        if state.get("wellbeing_scenario") in _RELAXATION_SCENARIOS:
-            # A human-state request must never be translated into an inferred
-            # appliance action. Pin the safe proposal after model planning too.
-            plan = plan.model_copy(
-                update={
-                    "command": "播放一首舒缓的轻音乐",
-                    "device": "音乐播放器",
-                    "room": "",
-                    "action": "play",
-                    "parameters": {},
-                    "rationale": "用户表达疲劳或放松诉求，采用非侵入的音乐建议，不推断空调等家电操作。",
-                }
-            )
         planned_device = next(
             (
                 canonical
@@ -748,8 +746,55 @@ class HouseholdAgentService:
             ),
             "",
         )
+        is_relaxation = state.get("wellbeing_scenario") in _RELAXATION_SCENARIOS
+        effective_state: AgentState = state
+        device = state.get("device", "")
+        if is_relaxation:
+            previous_device = self._previous_relaxation_device(
+                state["request"].transcript
+            )
+            if (
+                previous_device and planned_device == previous_device
+            ) or not self._relaxation_device_is_contextually_allowed(
+                planned_device, state.get("evidence", [])
+            ):
+                plan = self._fallback_relaxation_plan(
+                    state, state.get("evidence", [])
+                )["model_plan"]
+                planned_device = next(
+                    (
+                        canonical
+                        for alias, canonical in _DEVICE_ALIASES
+                        if alias in plan.device or alias in plan.command
+                    ),
+                    "",
+                )
+            allowed_devices = set(state.get("allowed_devices") or _RELAXATION_DEVICES)
+            if planned_device not in allowed_devices:
+                return {
+                    "decision": self._base_decision(
+                        state,
+                        status=DecisionStatus.BLOCKED,
+                        user_message="计划未通过安全校验，未提交设备操作。",
+                        rationale="放松场景的建议超出了空调、风扇和音乐播放器的低风险白名单。",
+                    )
+                }
+            device = planned_device
+            effective_state = dict(state)
+            effective_state["device"] = device
+            effective_state["room"] = "" if device == "音乐播放器" else (
+                state.get("room") or self.settings.agent_default_room
+            )
+            effective_state["action"] = {
+                "空调": "set",
+                "风扇": "open",
+                "音乐播放器": "play",
+            }[device]
+            effective_state["risk_level"] = (
+                RiskLevel.L2 if device == "空调" else RiskLevel.L1
+            )
         if any(marker in plan.command for marker in _UNSAFE) or (
-            planned_device and planned_device != device
+            not is_relaxation and planned_device and planned_device != device
         ):
             return {
                 "decision": self._base_decision(
@@ -769,15 +814,17 @@ class HouseholdAgentService:
                 self._extract_parameters(state["request"].transcript),
             )
         )
-        command = self._enforce_recommended_command(state, plan.command, parameters)
+        command = self._enforce_recommended_command(
+            effective_state, plan.command, parameters
+        )
         action = DeviceAction(
             command=command,
             device=device,
-            room=state.get("room", ""),
-            action=state["action"],
+            room=effective_state.get("room", ""),
+            action=effective_state["action"],
             parameters=parameters,
             action_level=ActionLevel.A2 if device in {"空调", "灯"} else ActionLevel.A1,
-            risk_level=state.get("risk_level", RiskLevel.L1),
+            risk_level=effective_state.get("risk_level", RiskLevel.L1),
             requires_confirmation=True,
         )
         return {
@@ -785,7 +832,7 @@ class HouseholdAgentService:
                 state,
                 status=DecisionStatus.EXECUTE,
                 user_message=self._contextual_user_message(
-                    state, state.get("evidence", []), parameters
+                    effective_state, state.get("evidence", []), parameters
                 ),
                 rationale=plan.rationale,
                 action=action,
@@ -795,6 +842,8 @@ class HouseholdAgentService:
     def _fallback_context_plan(
         self, state: AgentState, evidence: list[Evidence]
     ) -> dict[str, Any]:
+        if state.get("wellbeing_scenario") in _RELAXATION_SCENARIOS:
+            return self._fallback_relaxation_plan(state, evidence)
         transcript = state["request"].transcript
         params = self._extract_parameters(transcript)
         room_device = f"{state.get('room', '')}{state['device']}"
@@ -850,16 +899,141 @@ class HouseholdAgentService:
             "evidence": evidence,
         }
 
+    def _fallback_relaxation_plan(
+        self, state: AgentState, evidence: list[Evidence]
+    ) -> dict[str, Any]:
+        household = next(
+            (item for item in evidence if item.kind == "household_state"), None
+        )
+        weather = next((item for item in evidence if item.kind == "weather"), None)
+        indoor = household.data.get("indoor_temperature_c") if household else None
+        outside = weather.data.get("temperature_c") if weather else None
+        preferred = household.data.get("preferred_temperature_c") if household else None
+
+        if (
+            isinstance(indoor, (int, float)) and indoor >= 29
+        ) or (
+            not isinstance(indoor, (int, float))
+            and isinstance(outside, (int, float))
+            and outside >= 33
+        ):
+            candidates = ("空调", "空调", "风扇", "音乐播放器")
+        elif isinstance(indoor, (int, float)) and indoor >= 26:
+            candidates = ("风扇", "空调", "风扇", "音乐播放器")
+        elif isinstance(indoor, (int, float)) and indoor >= 23.5:
+            candidates = ("音乐播放器", "风扇", "音乐播放器")
+        else:
+            candidates = ("音乐播放器",)
+        previous_device = self._previous_relaxation_device(
+            state["request"].transcript
+        )
+        if previous_device:
+            alternatives = tuple(item for item in candidates if item != previous_device)
+            if alternatives:
+                candidates = alternatives
+        device = self._rng.choice(candidates)
+        effective_state: AgentState = dict(state)
+        effective_state["device"] = device
+        effective_state["room"] = "" if device == "音乐播放器" else (
+            state.get("room") or self.settings.agent_default_room
+        )
+        effective_state["action"] = {
+            "空调": "set",
+            "风扇": "open",
+            "音乐播放器": "play",
+        }[device]
+
+        params: dict[str, Any] = {}
+        if device == "空调":
+            params["temperature_c"] = self._recommended_ac_temperature(
+                outside,
+                indoor=indoor,
+                preferred=preferred,
+            )
+            if isinstance(indoor, (int, float)) and indoor >= 28:
+                params["mode"] = "强力"
+            rationale = self._air_conditioner_rationale(
+                effective_state,
+                weather,
+                household,
+                params["temperature_c"],
+            )
+        elif device == "风扇":
+            rationale = "结合当前室内温度，选择低风险的通风降温方案，并保留用户确认。"
+        else:
+            rationale = "当前更适合用舒缓音乐帮助放松，并同时建议短暂休息和补水。"
+        room_device = f"{effective_state.get('room', '')}{device}"
+        command = self._command_from_parts(effective_state, params, room_device)
+        return {
+            "model_plan": ModelPlan(
+                command=command,
+                device=device,
+                room=effective_state.get("room", ""),
+                action=effective_state["action"],
+                user_message=self._contextual_user_message(
+                    effective_state, evidence, params
+                ),
+                rationale=rationale,
+                parameters=params,
+            ),
+            "evidence": evidence,
+        }
+
+    @staticmethod
+    def _previous_relaxation_device(transcript: str) -> str:
+        if "上一方案" not in transcript:
+            return ""
+        previous_text = transcript.split("上一方案", 1)[-1]
+        return next(
+            (
+                canonical
+                for alias, canonical in _DEVICE_ALIASES
+                if alias in previous_text and canonical in _RELAXATION_DEVICES
+            ),
+            "",
+        )
+
+    @staticmethod
+    def _relaxation_device_is_contextually_allowed(
+        device: str, evidence: list[Evidence]
+    ) -> bool:
+        household = next(
+            (item for item in evidence if item.kind == "household_state"), None
+        )
+        weather = next((item for item in evidence if item.kind == "weather"), None)
+        indoor = household.data.get("indoor_temperature_c") if household else None
+        outside = weather.data.get("temperature_c") if weather else None
+        if device == "音乐播放器":
+            return True
+        if device == "空调":
+            return (
+                isinstance(indoor, (int, float)) and indoor >= 26
+            ) or (
+                not isinstance(indoor, (int, float))
+                and isinstance(outside, (int, float))
+                and outside >= 32
+            )
+        if device == "风扇":
+            return (
+                isinstance(indoor, (int, float)) and indoor >= 23.5
+            ) or (
+                not isinstance(indoor, (int, float))
+                and isinstance(outside, (int, float))
+                and outside >= 25
+            )
+        return False
+
     def _command_from_parts(
         self, state: AgentState, params: dict[str, Any], room_device: str
     ) -> str:
         action = state["action"]
-        if state.get("wellbeing_scenario") in _RELAXATION_SCENARIOS:
+        if state.get("device") == "音乐播放器" and action == "play":
             return "播放一首舒缓的轻音乐"
         if action == "close":
             return f"关闭{room_device}"
         if state["device"] == "空调" and "temperature_c" in params:
-            return f"打开{room_device}并设置为{params['temperature_c']}度"
+            mode = f"{params['mode']}模式" if params.get("mode") else ""
+            return f"打开{room_device}并设置为{params['temperature_c']}度{mode}"
         if state["device"] == "灯" and "brightness_percent" in params:
             return f"打开{room_device}并调到{params['brightness_percent']}%亮度"
         if state.get("comfort_intent") and action == "open":
@@ -870,12 +1044,13 @@ class HouseholdAgentService:
         self, state: AgentState, command: str, params: dict[str, Any]
     ) -> str:
         room_device = f"{state.get('room', '')}{state['device']}"
-        if state.get("wellbeing_scenario") in _RELAXATION_SCENARIOS:
+        if state.get("device") == "音乐播放器" and state.get("action") == "play":
             return "播放一首舒缓的轻音乐"
         if state["action"] == "close":
             return f"关闭{room_device}"
         if state["device"] == "空调" and "temperature_c" in params:
-            return f"打开{room_device}并设置为{params['temperature_c']}度"
+            mode = f"{params['mode']}模式" if params.get("mode") else ""
+            return f"打开{room_device}并设置为{params['temperature_c']}度{mode}"
         if state["device"] == "灯" and "brightness_percent" in params:
             return f"打开{room_device}并调到{params['brightness_percent']}%亮度"
         if state.get("comfort_intent") and state["action"] == "open":
@@ -896,7 +1071,7 @@ class HouseholdAgentService:
             params["brightness_percent"] = int(
                 brightness.group(1) or brightness.group(2)
             )
-        for mode in ("制冷", "制热", "除湿", "送风", "自动"):
+        for mode in ("强力", "制冷", "制热", "除湿", "送风", "自动"):
             if mode in transcript:
                 params["mode"] = mode
                 break
@@ -918,6 +1093,9 @@ class HouseholdAgentService:
                 result.pop("brightness_percent", None)
         if device != "空调":
             result.pop("temperature_c", None)
+            result.pop("mode", None)
+        elif result.get("mode") not in {"强力", "制冷", "制热", "除湿", "送风", "自动"}:
+            result.pop("mode", None)
         if device != "灯":
             result.pop("brightness_percent", None)
         return result
@@ -1005,10 +1183,25 @@ class HouseholdAgentService:
         weather = next((item for item in evidence if item.kind == "weather"), None)
         if state.get("wellbeing_scenario") in _RELAXATION_SCENARIOS:
             feeling = "有些疲惫" if state.get("wellbeing_scenario") == "fatigue" else "需要放松"
-            return (
-                f"听起来你{feeling}。建议先休息五到十分钟、喝几口水；"
-                "也可以让天猫精灵播放一首舒缓的轻音乐，帮助你放松。"
-            )
+            common = f"听起来你{feeling}，建议先休息五到十分钟、喝几口水。"
+            indoor = household.data.get("indoor_temperature_c") if household else None
+            outside = weather.data.get("temperature_c") if weather else None
+            facts: list[str] = []
+            if isinstance(indoor, (int, float)):
+                facts.append(f"{room}约{float(indoor):.1f}℃")
+            if isinstance(outside, (int, float)):
+                facts.append(f"室外约{float(outside):.1f}℃")
+            prefix = "、".join(facts)
+            if state.get("device") == "空调":
+                target = params.get("temperature_c", 26)
+                mode = f"{params['mode']}模式" if params.get("mode") else ""
+                proposal = f"建议把空调设为{target}℃{mode}"
+            elif state.get("device") == "风扇":
+                proposal = "建议打开风扇吹一会儿"
+            else:
+                proposal = "建议播放一首舒缓的轻音乐"
+            context = f"结合{prefix}，" if prefix else ""
+            return f"{common}{context}{proposal}。"
         if state.get("device") == "空调":
             target = params.get("temperature_c")
             indoor = household.data.get("indoor_temperature_c") if household else None
@@ -1084,7 +1277,10 @@ class HouseholdAgentService:
         if not self._data_tools:
             return evidence
         kinds = {item.kind for item in evidence}
-        if state.get("device") == "空调" and "weather" not in kinds:
+        if (
+            state.get("device") == "空调"
+            or state.get("wellbeing_scenario") in _RELAXATION_SCENARIOS
+        ) and "weather" not in kinds:
             evidence = self._replace_evidence(
                 evidence, await self._data_tools.get_weather()
             )
@@ -1118,7 +1314,10 @@ class HouseholdAgentService:
     ) -> list[str]:
         kinds = {item.kind for item in evidence}
         required = {"household_state"} if state.get("needs_context") else set()
-        if state.get("device") == "空调":
+        if (
+            state.get("device") == "空调"
+            or state.get("wellbeing_scenario") in _RELAXATION_SCENARIOS
+        ):
             required.add("weather")
         household = next(
             (item for item in evidence if item.kind == "household_state"), None

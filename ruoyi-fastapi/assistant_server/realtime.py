@@ -37,11 +37,14 @@ ASSISTANT_INSTRUCTIONS = """请使用自然、简洁、温暖的中文回答，�
 WAKE_PHRASE = "管家"
 WAKE_REPLY = "我在，有什么需要？"
 EXIT_REPLY = "好的，需要时再叫我。"
-SUBMIT_SUCCESS_REPLY = "指令已提交给天猫精灵，请以设备实际状态为准。"
+SUBMIT_SUCCESS_REPLY = "好的，指令已提交给天猫精灵，请以设备实际状态为准。"
 SUBMIT_FAILED_REPLY = "家居指令没有提交成功，请稍后再试。"
 SUBMIT_TIMEOUT_REPLY = "没有收到设备端的提交结果，本次不能确认已经提交，请稍后再试。"
 CANCEL_REPLY = "好的，已取消，需要时再叫我。"
-CONFIRM_REPLY = "请回答“执行”或“取消”。"
+CONFIRM_REPLY = (
+    "方案还没有执行。你可以直接同意、取消、补充要求或说换个方案，"
+    "也可以重新叫管家或结束对话。"
+)
 _WAKE_PREFIX_RE = re.compile(
     r"^\s*(?:(?:你好|您好|嗨|嘿|喂)[，,。.!！?？:：、\s]*)?"
     r"管\s*家(?:[，,。.!！?？:：;；、\s]*)?(?P<request>.*)$"
@@ -103,24 +106,69 @@ def is_conversation_exit(transcript: str) -> bool:
 
 
 def classify_home_confirmation(transcript: str) -> str:
-    """Classify a short answer to a pending home-control proposal."""
+    """Classify a natural short answer to a pending home-control proposal."""
     compact = re.sub(r"[\s，,。.!！?？;；：:、~～]+", "", str(transcript or ""))
-    if not compact or len(compact) > 24:
+    if not compact or len(compact) > 36:
         return ""
     cancel_phrases = {
         "取消", "不要", "不用", "算了", "别执行", "不要执行", "不执行", "不需要",
         "先不用", "暂时不用", "不用了", "不要了", "取消操作", "先别开", "先别关",
+        "先算了", "暂时不要", "我再想想", "让我再想想", "先不处理", "不用处理了",
     }
     confirm_phrases = {
         "执行", "确认", "同意", "可以", "可以执行", "确认执行", "好的执行",
         "好执行", "好的执行吧", "执行吧", "就这么做", "按这个方案", "按这个方案执行", "帮我执行",
         "打开吧", "开启吧", "关掉吧", "关闭吧", "调整吧", "设置吧",
+        "好", "好的", "好啊", "行", "行啊", "没问题", "就按这个来", "就按你说的做",
+        "按你说的做", "麻烦你了", "那就这样", "帮我弄吧", "照这个做", "开始吧",
     }
     if compact in cancel_phrases:
         return "cancel"
     if compact in confirm_phrases:
         return "confirm"
     return ""
+
+
+def extract_confirmed_home_addition(transcript: str) -> str:
+    """Extract an extra request when the user confirms and extends a proposal."""
+    text = str(transcript or "").strip()
+    match = re.match(
+        r"^(?:(?:好|好的|行)[，,。\s]*)?"
+        r"(?:确认执行|同意执行|执行|按这个方案执行|就按这个方案|就按你说的做)"
+        r"(?:吧)?[，,。;；\s]*(?P<rest>.+)$",
+        text,
+    )
+    if not match:
+        return ""
+    rest = str(match.group("rest") or "").strip()
+    connector = re.match(
+        r"^(?:顺带|顺便|另外|同时|并且|而且|再|还要|也)(?:可以)?(?P<request>.+)$",
+        rest,
+    )
+    if not connector:
+        return ""
+    request = str(connector.group("request") or "").strip("，,。.!！?？;；：:、 ")
+    request = re.sub(r"^(?:请|麻烦|可以)?(?:再)?", "", request).strip()
+    return request[:500]
+
+
+def is_pending_replan_request(transcript: str) -> bool:
+    compact = re.sub(r"[\s，,。.!！?？;；：:、~～]+", "", str(transcript or ""))
+    return compact in {
+        "换个方案", "换一个方案", "重新建议", "重新推荐", "再想一个", "还有别的方案吗",
+        "有别的方案吗", "换一种", "重来", "重新开始",
+    }
+
+
+def combine_home_commands(base_command: str, extra_command: str) -> str:
+    """Build one Tmall utterance without punctuation that would drop a sub-command."""
+    base = str(base_command or "").strip("，,。.!！?？;；：:、 ")
+    extra = str(extra_command or "").strip("，,。.!！?？;；：:、 ")
+    if not base:
+        return extra[:120]
+    if not extra or extra == base:
+        return base[:120]
+    return f"{base}并且{extra}"[:120]
 
 
 def classify_home_command_result(status: str) -> tuple[str, str]:
@@ -416,6 +464,7 @@ class PendingHomeAction:
     rationale: str
     decision_basis: list[str]
     evidence: list[dict[str, Any]]
+    transcript: str
 
 
 @dataclass(slots=True)
@@ -1056,40 +1105,60 @@ class RealtimeProxy:
                     continue
 
                 if wake_state.pending_home_action is not None:
-                    confirmation = classify_home_confirmation(content)
-                    if confirmation == "confirm":
-                        action = wake_state.pending_home_action
+                    restart_woke, restart_request = extract_wake_request(content)
+                    if restart_woke:
                         wake_state.pending_home_action = None
                         self._clear_pending_home_result(wake_state)
-                        wake_state.pending_home_execution_id = action.execution_id
-                        wake_state.home_result_timeout_task = asyncio.create_task(
-                            self._wait_for_home_command_result(
-                                execution_id=action.execution_id,
-                                upstream=upstream,
-                                writer=writer,
-                                wake_state=wake_state,
-                            ),
-                            name=f"home-result-{action.execution_id[:8]}",
-                        )
-                        await writer.send(
-                            {
-                                "type": "assistant.home_command.pending",
-                                "command": action.command,
-                                "execution_id": action.execution_id,
-                                "source": "household_agent_confirmed",
-                                "message": action.message,
-                                "rationale": action.rationale,
-                                "decision_basis": action.decision_basis,
-                                "evidence": action.evidence,
-                            }
-                        )
-                        self.metrics.inc("genie_provider_commands_total")
-                        await writer.send(
-                            {
-                                "type": "assistant.agent.notice",
-                                "status": "submitting",
-                                "message": "正在等待 T10S 返回真实提交结果",
-                            }
+                        if restart_request and is_conversation_exit(restart_request):
+                            wake_state.mode = "ending"
+                            await self._create_upstream_response(
+                                upstream,
+                                f"只用中文回答“{EXIT_REPLY}”不得增加称呼、解释或其他文字。",
+                            )
+                            self.metrics.inc("conversation_exit_requests_total")
+                            continue
+                        if not restart_request or is_pending_replan_request(restart_request):
+                            await self._create_upstream_response(
+                                upstream,
+                                "只用中文回答“好的，我们重新开始。请告诉我现在需要什么。”不得增加其他文字。",
+                            )
+                            continue
+                        content = restart_request
+
+                if wake_state.pending_home_action is not None:
+                    action = wake_state.pending_home_action
+                    addition = extract_confirmed_home_addition(content)
+                    confirmation = classify_home_confirmation(content)
+                    if addition:
+                        wake_state.pending_home_action = None
+                        self._clear_pending_home_result(wake_state)
+                        if wake_state.home_plan_in_progress:
+                            wake_state.pending_home_action = action
+                            await self._create_upstream_response(
+                                upstream,
+                                "只用中文回答“我正在分析补充要求，请稍等。”不得增加其他文字。",
+                            )
+                        else:
+                            wake_state.home_plan_in_progress = True
+                            asyncio.create_task(
+                                self._plan_and_dispatch_home_command(
+                                    writer=writer,
+                                    upstream=upstream,
+                                    wake_state=wake_state,
+                                    transcript=addition,
+                                    user_id=user_id,
+                                    session_id=stats.session_id,
+                                    memory_context=memory_context,
+                                    confirmed_base_action=action,
+                                ),
+                                name=f"home-agent-addition-{stats.session_id[:8]}",
+                            )
+                    elif confirmation == "confirm":
+                        await self._submit_home_action(
+                            action=action,
+                            writer=writer,
+                            upstream=upstream,
+                            wake_state=wake_state,
                         )
                     elif confirmation == "cancel":
                         wake_state.pending_home_action = None
@@ -1098,6 +1167,54 @@ class RealtimeProxy:
                             upstream,
                             f"只用中文回答“{CANCEL_REPLY}”不得增加解释或其他文字。",
                         )
+                    elif is_pending_replan_request(content):
+                        wake_state.pending_home_action = None
+                        if wake_state.home_plan_in_progress:
+                            wake_state.pending_home_action = action
+                            await self._create_upstream_response(
+                                upstream,
+                                "只用中文回答“我正在分析新的方案，请稍等。”不得增加其他文字。",
+                            )
+                        else:
+                            wake_state.home_plan_in_progress = True
+                            replan_transcript = (
+                                f"{action.transcript}。请换一个与上一方案不同的低风险方案，"
+                                f"上一方案是：{action.command}"
+                            )
+                            asyncio.create_task(
+                                self._plan_and_dispatch_home_command(
+                                    writer=writer,
+                                    upstream=upstream,
+                                    wake_state=wake_state,
+                                    transcript=replan_transcript,
+                                    user_id=user_id,
+                                    session_id=stats.session_id,
+                                    memory_context=memory_context,
+                                ),
+                                name=f"home-agent-replan-{stats.session_id[:8]}",
+                            )
+                    elif self.agent.might_be_home_request(content):
+                        wake_state.pending_home_action = None
+                        if wake_state.home_plan_in_progress:
+                            wake_state.pending_home_action = action
+                            await self._create_upstream_response(
+                                upstream,
+                                "只用中文回答“我正在分析新的要求，请稍等。”不得增加其他文字。",
+                            )
+                        else:
+                            wake_state.home_plan_in_progress = True
+                            asyncio.create_task(
+                                self._plan_and_dispatch_home_command(
+                                    writer=writer,
+                                    upstream=upstream,
+                                    wake_state=wake_state,
+                                    transcript=content,
+                                    user_id=user_id,
+                                    session_id=stats.session_id,
+                                    memory_context=memory_context,
+                                ),
+                                name=f"home-agent-replace-{stats.session_id[:8]}",
+                            )
                     else:
                         await self._create_upstream_response(
                             upstream,
@@ -1231,6 +1348,47 @@ class RealtimeProxy:
             wake_state.last_assistant_transcript,
         )
 
+    async def _submit_home_action(
+        self,
+        *,
+        action: PendingHomeAction,
+        writer: ClientWriter,
+        upstream: ClientConnection,
+        wake_state: WakeConversationState,
+    ) -> None:
+        wake_state.pending_home_action = None
+        self._clear_pending_home_result(wake_state)
+        wake_state.pending_home_execution_id = action.execution_id
+        wake_state.home_result_timeout_task = asyncio.create_task(
+            self._wait_for_home_command_result(
+                execution_id=action.execution_id,
+                upstream=upstream,
+                writer=writer,
+                wake_state=wake_state,
+            ),
+            name=f"home-result-{action.execution_id[:8]}",
+        )
+        await writer.send(
+            {
+                "type": "assistant.home_command.pending",
+                "command": action.command,
+                "execution_id": action.execution_id,
+                "source": "household_agent_confirmed",
+                "message": action.message,
+                "rationale": action.rationale,
+                "decision_basis": action.decision_basis,
+                "evidence": action.evidence,
+            }
+        )
+        self.metrics.inc("genie_provider_commands_total")
+        await writer.send(
+            {
+                "type": "assistant.agent.notice",
+                "status": "submitting",
+                "message": "正在等待 T10S 返回真实提交结果",
+            }
+        )
+
     async def _handle_home_command_result(
         self,
         *,
@@ -1253,6 +1411,7 @@ class RealtimeProxy:
             return
         outcome, reply = classify_home_command_result(str(event.get("status") or ""))
         self._clear_pending_home_result(wake_state)
+        wake_state.mode = "ending"
         self.metrics.inc(f"genie_provider_receipt_{outcome}_total")
         await writer.send(
             {
@@ -1281,6 +1440,7 @@ class RealtimeProxy:
                 return
             wake_state.pending_home_execution_id = ""
             wake_state.home_result_timeout_task = None
+            wake_state.mode = "ending"
             self.metrics.inc("genie_provider_receipt_timeout_total")
             await writer.send(
                 {
@@ -1371,6 +1531,7 @@ class RealtimeProxy:
         user_id: str,
         session_id: str,
         memory_context: str,
+        confirmed_base_action: PendingHomeAction | None = None,
     ) -> None:
         await writer.send(
             {
@@ -1423,14 +1584,49 @@ class RealtimeProxy:
                     }
                     for item in decision.evidence
                 ]
-                wake_state.pending_home_action = PendingHomeAction(
+                proposed_action = PendingHomeAction(
                     command=decision.action.command,
                     execution_id=decision.execution_id,
                     message=decision.user_message,
                     rationale=decision.rationale,
                     decision_basis=decision.decision_basis,
                     evidence=evidence,
+                    transcript=transcript,
                 )
+                if confirmed_base_action is not None:
+                    combined_action = PendingHomeAction(
+                        command=combine_home_commands(
+                            confirmed_base_action.command,
+                            proposed_action.command,
+                        ),
+                        execution_id=proposed_action.execution_id,
+                        message=(
+                            f"{confirmed_base_action.message}；补充要求："
+                            f"{proposed_action.message}"
+                        )[:500],
+                        rationale=(
+                            f"{confirmed_base_action.rationale}；"
+                            f"{proposed_action.rationale}"
+                        )[:1000],
+                        decision_basis=(
+                            confirmed_base_action.decision_basis
+                            + proposed_action.decision_basis
+                        )[:12],
+                        evidence=(
+                            confirmed_base_action.evidence + proposed_action.evidence
+                        )[:24],
+                        transcript=(
+                            f"{confirmed_base_action.transcript}；{transcript}"
+                        )[:500],
+                    )
+                    await self._submit_home_action(
+                        action=combined_action,
+                        writer=writer,
+                        upstream=upstream,
+                        wake_state=wake_state,
+                    )
+                    return
+                wake_state.pending_home_action = proposed_action
                 await writer.send(
                     {
                         "type": "assistant.agent.notice",
@@ -1444,22 +1640,30 @@ class RealtimeProxy:
                 await self._create_upstream_response(
                     upstream,
                     "请完整、自然地朗读以下家庭状态分析和操作建议，然后询问用户是否执行。"
-                    f"只说这段内容，不得声称已经执行：{decision.user_message} 是否按这个方案执行？",
+                    f"只说这段内容，不得声称已经执行：{decision.user_message} "
+                    "需要我按这个方案处理吗？你也可以直接补充调整或换个方案。",
                 )
                 return
             # The Android ContentProvider may only be invoked by an explicit
             # EXECUTE decision.  Advice, clarification and non-applicable
             # results must never fall through to the old raw-command path.
+            if confirmed_base_action is not None:
+                wake_state.pending_home_action = confirmed_base_action
+                message = (
+                    f"补充要求暂时不能合并，原方案尚未执行。{decision.user_message}"
+                )
+            else:
+                message = decision.user_message
             await writer.send(
                 {
                     "type": "assistant.agent.notice",
                     "status": decision.status.value,
-                    "message": decision.user_message,
+                    "message": message,
                 }
             )
             await self._create_upstream_response(
                 upstream,
-                f"请自然、完整地朗读这段结论，只说结论本身：{decision.user_message}",
+                f"请自然、完整地朗读这段结论，只说结论本身：{message}",
             )
             return
         except Exception:
@@ -1468,16 +1672,26 @@ class RealtimeProxy:
                 session_id,
             )
             self.metrics.inc("agent_failures_total")
+            if confirmed_base_action is not None and wake_state.mode == "awake":
+                wake_state.pending_home_action = confirmed_base_action
             await writer.send(
                 {
                     "type": "assistant.agent.notice",
                     "status": "temporarily_unavailable",
-                    "message": "智能决策暂时不可用，本次未执行家居操作，请稍后再试。",
+                    "message": (
+                        "补充要求暂时无法分析，原方案尚未执行。"
+                        if confirmed_base_action is not None
+                        else "智能决策暂时不可用，本次未执行家居操作，请稍后再试。"
+                    ),
                 }
             )
             await self._create_upstream_response(
                 upstream,
-                "只用中文回答“智能决策暂时不可用，本次未执行家居操作，请稍后再试。”",
+                (
+                    "只用中文回答“补充要求暂时无法分析，原方案尚未执行。你可以继续调整、执行原方案或取消。”"
+                    if confirmed_base_action is not None
+                    else "只用中文回答“智能决策暂时不可用，本次未执行家居操作，请稍后再试。”"
+                ),
             )
             return
         finally:

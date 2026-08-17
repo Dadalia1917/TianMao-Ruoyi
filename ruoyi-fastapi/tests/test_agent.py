@@ -60,6 +60,20 @@ class FakeDataTools:
         )
 
 
+class CoolDataTools(FakeDataTools):
+    async def get_household_state(
+        self, *, user_id: str, room: str, memory_context: str = ""
+    ) -> Evidence:
+        item = await super().get_household_state(
+            user_id=user_id,
+            room=room,
+            memory_context=memory_context,
+        )
+        item.data["indoor_temperature_c"] = 22
+        item.summary = f"{room}实测室温22℃，当前无需降温"
+        return item
+
+
 def build_agent(monkeypatch: pytest.MonkeyPatch) -> HouseholdAgentService:
     monkeypatch.setenv("DASHSCOPE_API_KEY", "")
     agent = HouseholdAgentService(Settings.from_env())
@@ -203,8 +217,17 @@ def test_bright_room_recommends_lower_light_level(monkeypatch):
     assert decision.action.command == "打开客厅灯并调到30%亮度"
 
 
-def test_fatigue_proposes_relaxing_music_instead_of_air_conditioner(monkeypatch):
+class FixedChoice:
+    def __init__(self, index: int) -> None:
+        self.index = index
+
+    def choice(self, values):
+        return values[self.index % len(values)]
+
+
+def test_fatigue_proposes_a_bounded_contextual_action_with_confirmation(monkeypatch):
     agent = build_agent(monkeypatch)
+    agent._rng = FixedChoice(0)
     decision = run_plan(agent, AgentRequest(transcript="我累了", user_id="1"))
 
     assert agent.might_be_home_request("我累了")
@@ -212,13 +235,57 @@ def test_fatigue_proposes_relaxing_music_instead_of_air_conditioner(monkeypatch)
     assert not agent.might_be_advice_only_request("我累了")
     assert decision.status == DecisionStatus.EXECUTE
     assert decision.action is not None
-    assert decision.action.device == "音乐播放器"
-    assert decision.action.action == "play"
-    assert decision.action.command == "播放一首舒缓的轻音乐"
+    assert decision.action.device in {"空调", "风扇", "音乐播放器"}
+    assert decision.action.device == "风扇"
+    assert decision.action.action == "open"
+    assert decision.action.command == "打开客厅风扇"
     assert decision.action.requires_confirmation is True
-    assert "空调" not in decision.user_message
     assert "五到十分钟" in decision.user_message
+    assert "建议打开风扇" in decision.user_message
     assert any(item.kind == "household_state" for item in decision.evidence)
+    assert any(item.kind == "weather" for item in decision.evidence)
+
+
+def test_relaxation_fallback_varies_between_equally_safe_devices(monkeypatch):
+    fan_agent = build_agent(monkeypatch)
+    fan_agent._rng = FixedChoice(0)
+    music_agent = build_agent(monkeypatch)
+    music_agent._rng = FixedChoice(-1)
+
+    fan = run_plan(fan_agent, AgentRequest(transcript="我累了", user_id="1"))
+    music = run_plan(music_agent, AgentRequest(transcript="我累了", user_id="1"))
+
+    assert fan.action is not None
+    assert music.action is not None
+    assert fan.action.device == "风扇"
+    assert music.action.device == "音乐播放器"
+    assert fan.action.device != music.action.device
+
+
+def test_relaxation_can_recommend_air_conditioner_strong_mode(monkeypatch):
+    agent = build_agent(monkeypatch)
+    agent._rng = FixedChoice(1)
+
+    decision = run_plan(agent, AgentRequest(transcript="我累了", user_id="1"))
+
+    assert decision.action is not None
+    assert decision.action.device == "空调"
+    assert decision.action.action == "set"
+    assert decision.action.parameters == {"temperature_c": 25, "mode": "强力"}
+    assert decision.action.command == "打开客厅空调并设置为25度强力模式"
+    assert "强力模式" in decision.user_message
+
+
+def test_relaxation_does_not_randomly_cool_an_already_cool_room(monkeypatch):
+    agent = build_agent(monkeypatch)
+    agent._data_tools = CoolDataTools()
+    agent._rng = FixedChoice(1)
+
+    decision = run_plan(agent, AgentRequest(transcript="我累了", user_id="1"))
+
+    assert decision.action is not None
+    assert decision.action.device == "音乐播放器"
+    assert decision.action.command == "播放一首舒缓的轻音乐"
 
 
 def test_direct_relaxing_music_request_uses_provider_channel(monkeypatch):

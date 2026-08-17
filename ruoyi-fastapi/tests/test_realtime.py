@@ -10,10 +10,13 @@ from assistant_server.realtime import (
     classify_home_command_result,
     classify_home_confirmation,
     classify_upstream_connection_error,
+    combine_home_commands,
+    extract_confirmed_home_addition,
     extract_wake_request,
     extract_home_control_command,
     is_probable_assistant_echo,
     is_conversation_exit,
+    is_pending_replan_request,
     should_start_acoustic_relay,
 )
 
@@ -138,13 +141,53 @@ def test_wake_phrase_has_a_short_fixed_acknowledgement():
         ("可以", "confirm"),
         ("好的，执行吧", "confirm"),
         ("就这么做", "confirm"),
+        ("行啊", "confirm"),
+        ("就按你说的做", "confirm"),
         ("不用了", "cancel"),
         ("先别开", "cancel"),
-        ("我再想想", ""),
+        ("我再想想", "cancel"),
     ),
 )
 def test_home_control_confirmation_is_explicit(transcript, expected):
     assert classify_home_confirmation(transcript) == expected
+
+
+@pytest.mark.parametrize(
+    ("transcript", "expected"),
+    (
+        ("执行，顺带可以帮我放一首舒缓的音乐吗", "帮我放一首舒缓的音乐吗"),
+        ("好的，确认执行，另外再打开风扇", "打开风扇"),
+        ("可以帮我放首歌吗", ""),
+        ("执行", ""),
+    ),
+)
+def test_confirmation_can_include_an_extra_home_request(transcript, expected):
+    assert extract_confirmed_home_addition(transcript) == expected
+
+
+def test_compound_home_command_preserves_both_actions_for_tmall():
+    command = combine_home_commands(
+        "打开客厅空调并设置为26度强力模式",
+        "播放一首舒缓的轻音乐",
+    )
+
+    assert command == "打开客厅空调并设置为26度强力模式并且播放一首舒缓的轻音乐"
+    assert "，" not in command
+
+
+@pytest.mark.parametrize(
+    "transcript",
+    ("换个方案", "还有别的方案吗", "重新开始"),
+)
+def test_pending_proposal_can_be_replanned(transcript):
+    assert is_pending_replan_request(transcript)
+
+
+def test_wake_prefixed_exit_can_be_interpreted_after_pending_restart_parse():
+    woke, request = extract_wake_request("管家，结束对话")
+
+    assert woke is True
+    assert is_conversation_exit(request)
 
 
 @pytest.mark.parametrize(
