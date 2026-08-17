@@ -15,8 +15,8 @@ android {
         applicationId = "com.jpx.tmallsmarthome"
         minSdk = 23
         targetSdk = 35
-        versionCode = 111
-        versionName = "1.1.1"
+        versionCode = 112
+        versionName = "1.1.2"
     }
 
     buildFeatures {

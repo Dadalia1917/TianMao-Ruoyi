@@ -1,18 +1,18 @@
 # 天猫智家 Docker 部署包
 
-本目录集中保存天猫智家 v1.1.1 的容器编排、镜像构建和部署脚本。Docker 构建上下文仍为上一级 `RuoYi` 工程根目录，以便构建 Java、FastAPI、消费者端 H5 和运营后台。
+本目录集中保存天猫智家 v1.1.2 的容器编排、镜像构建和部署脚本。Docker 构建上下文仍为上一级 `RuoYi` 工程根目录，以便构建 Java、FastAPI、消费者端 H5 和运营后台。
 
-> 发布状态（2026 年 8 月 14 日 20:04:17）：阿里云 `java-api`、`ai-gateway`、`web-gateway` 已更新为 v1.1.1 联动版，MySQL/Redis 数据卷保持不变；公网健康接口返回 v1.1.1/ready，Agent 对“我有点累了”实测生成待确认的音乐播放器方案。
+> 发布状态（2026.08.17）：本地 Compose 三项业务镜像标签已统一为 v1.1.2，AI 网关基础镜像从 `python:3.11-slim` 升级为官方 `python:3.14.6-slim`；依赖安装及 Linux 镜像构建成功，本机 YOLO Python 3.14.4 回归为 `110 passed`。
 
-> 语音部署验收：Compose 已透传 `REALTIME_VAD_*` 与 `REALTIME_ECHO_GUARD_SECONDS`；云端 H5 已包含 929 字节 `pcm-capture-worklet.js`，采集诊断、播报状态与回灌过滤代码已上线。
+> 云端状态：正式 RuoYi `120.55.64.225:/opt/tmall-smart-home` 已同步 v1.1.2；`java-api`、`ai-gateway`、`web-gateway` 三项业务镜像已切换，FastAPI 实际运行 Python 3.14.6 且内部 `/health/ready` 全部 ready。云端只保留经包内版本核验的 `backups/rollback-v1.1.1-20260817-101501.tar.gz`；若出现 3.14 特有问题，可恢复该包并回滚 Python 3.11。`139.196.94.58:/opt/tmall-genie-ai` 是旧 DeepSeek Webhook，本轮未改动。
 
 ## 目录结构
 
 ```text
 ruoyi-docker/
 ├─ compose.yaml                 # MySQL、Redis、Java、FastAPI、Caddy 编排
-├─ .env.example                 # 生产环境变量模板，可提交
-├─ .env                         # 本机/服务器密钥，不提交
+├─ .env.example                 # 本地开发配置说明，可提交
+├─ .env                         # 已脱敏的团队本地默认值，可提交
 ├─ config/
 │  ├─ Caddyfile                 # HTTPS、静态站点和反向代理
 │  ├─ daemon.aliyun.json        # 可选的阿里云 Docker 镜像加速配置
@@ -28,18 +28,28 @@ ruoyi-docker/
 
 工程根目录的 `.dockerignore` 必须保留；它用于控制发送给 Docker Builder 的整个 RuoYi 构建上下文。
 
-## 首次部署
+## 本地开箱启动
+
+仓库内 `.env` 已统一使用 MySQL `root / 123456`，Redis 本地密码为 `123456`。同事克隆后可直接执行：
+
+```bash
+docker compose -f ruoyi-docker/compose.yaml --env-file ruoyi-docker/.env up -d --build --wait
+```
+
+不填写 `DASHSCOPE_API_KEY` 也能构建和启动基础服务；实时语音、文字模型和 Agent 的外部调用需要在启动进程前通过系统环境变量注入真实 Key。仓库中的本地密码和 Token 只用于开发机，不得直接用于公网。
+
+## 首次生产部署
 
 在 Ubuntu 服务器的工程根目录执行：
 
 ```bash
-cp ruoyi-docker/.env.example ruoyi-docker/.env
-chmod 600 ruoyi-docker/.env
-vi ruoyi-docker/.env
-sh ruoyi-docker/scripts/deploy.sh
+cp ruoyi-docker/.env ruoyi-docker/.env.production.local
+chmod 600 ruoyi-docker/.env.production.local
+vi ruoyi-docker/.env.production.local
+sh ruoyi-docker/scripts/deploy.sh ruoyi-docker/.env.production.local
 ```
 
-至少替换 MySQL、Redis、Token、百炼 API Key 等 `CHANGE_ME` 项。真实密码和 API Key 只能放在 `ruoyi-docker/.env`，不得写入 Compose、README、镜像或 Git。
+必须替换 MySQL、Redis、Token、本地域名和百炼 API Key；`.env.production.local` 已被忽略。真实密码和 API Key 只能放在服务器私有环境文件或密钥服务，不得写入 `.env`、Compose、README、镜像或 Git。
 
 ## 手动管理
 
@@ -80,4 +90,4 @@ docker compose -f compose.yaml --env-file deploy/docker/.env logs -f --tail=200
 curl -fsS http://127.0.0.1/health/ready
 ```
 
-`/opt/tmall-smart-home/deploy/docker/.env` 权限为 600；部署前回滚包位于服务器 `backups/v1.1.1-before-20260814-194008.tar.gz`。现网 Agent 使用 `qwen3.8-max`，家电仍由 T10S 天猫精灵内部 `GenieApi` 控制，不经过 Docker 或 Home Assistant。
+`/opt/tmall-smart-home/deploy/docker/.env` 权限为 600；当前唯一回滚包位于服务器 `backups/rollback-v1.1.1-20260817-101501.tar.gz`，包内 `APP_VERSION=1.1.1` 已核验。现网 Agent 使用 `qwen3.8-max`，家电仍由 T10S 天猫精灵内部 `GenieApi` 控制，不经过 Docker 或 Home Assistant。

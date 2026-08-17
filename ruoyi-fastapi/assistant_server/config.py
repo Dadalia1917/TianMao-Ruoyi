@@ -176,7 +176,7 @@ class Settings:
             mysql_user=os.getenv("MYSQL_USER", "root").strip(),
             # The team development database is standardized on root/123456.
             # Production Docker deployments always override this value through
-            # MYSQL_PASSWORD in ruoyi-docker/.env.
+            # a server-private environment file such as .env.production.local.
             mysql_password=os.getenv("MYSQL_PASSWORD", "123456") or "123456",
             mysql_pool_min_size=_as_int("MYSQL_POOL_MIN_SIZE", 2),
             mysql_pool_max_size=_as_int("MYSQL_POOL_MAX_SIZE", 20),

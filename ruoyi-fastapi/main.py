@@ -32,7 +32,7 @@ from assistant_server.text_chat import TextChatError, TextChatService
 
 
 BASE_DIR = Path(__file__).resolve().parent
-APP_VERSION = "1.1.1"
+APP_VERSION = "1.1.2"
 load_local_env(BASE_DIR / ".env")
 settings = Settings.from_env()
 

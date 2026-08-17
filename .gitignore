@@ -52,7 +52,9 @@ nbdist/
 .env.*.local
 !.env.example
 !**/.env.example
-ruoyi-docker/.env
+# 这两份 .env 仅含可公开的本地开发默认值，保证克隆后无需改数据库配置。
+!ruoyi-fastapi/.env
+!ruoyi-docker/.env
 
 # Android signing and local package artifacts
 ruoyi-app/apk/.signing/

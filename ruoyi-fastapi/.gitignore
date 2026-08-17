@@ -1,4 +1,6 @@
-.env
+# .env 是已脱敏的团队本地开发配置；个人/生产覆盖仍不得入库。
+.env.local
+.env.*.local
 .venv/
 .idea/
 __pycache__/

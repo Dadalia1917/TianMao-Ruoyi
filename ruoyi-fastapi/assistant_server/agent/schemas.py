@@ -79,7 +79,7 @@ class AgentDecision(BaseModel):
     action: DeviceAction | None = None
     evidence: list[Evidence] = Field(default_factory=list)
     used_function_calling: bool = False
-    policy_version: str = "household-agent-1.1.1"
+    policy_version: str = "household-agent-1.1.2"
     created_at: datetime
 
 

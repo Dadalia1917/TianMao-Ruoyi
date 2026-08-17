@@ -32,7 +32,7 @@ export default {
     // 应用名称
     name: "天猫智家语音助手",
     // 应用版本
-    version: "1.1.1",
+    version: "1.1.2",
     // 应用logo
     logo: "/static/logo.png",
     // 官方网站

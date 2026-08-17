@@ -1,24 +1,23 @@
 # 天猫智家实时语音服务
 
-**产品版本：v1.1.1 · 文档更新时间：2026 年 8 月 14 日 20:04:17（UTC+8）**
+**产品版本：v1.1.2 · 文档更新时间：2026.08.17（UTC+8）**
 
-> 发布状态（2026 年 8 月 14 日 20:04:17）：v1.1.1 语音与 Agent 联动版已部署到阿里云；`ai-gateway:1.1.1` 健康，公网 `/health/ready` 返回 `version=1.1.1`、`household_agent=ready`，云端 Qwen3.8-Max Function Calling 实测通过。
+> 发布状态（2026.08.17）：v1.1.2 Agent 自然确认与多方案放松逻辑已完成；现有 YOLO Conda Python 3.14.4 下 `110 passed`。正式阿里云 `ai-gateway:1.1.2` 已运行官方 Python 3.14.6，内部 `/health/ready` 返回 `version=1.1.2`，数据库、记忆、文字对话和 household Agent 均 ready；T10S 实时连接已恢复。
 
-> 验收结果：完整测试 `96 passed`；客户端播报期转写拦截、播报结束后的相似转写过滤、采集诊断指标、可配置 VAD 和 PCM Worklet 均已同步云端。云端“我有点累了”返回待确认的舒缓音乐方案，“我渴了”只给建议且无设备动作。
+> 控制边界：确认后的命令继续由 T10S 天猫精灵内部 `GenieApi / method=15` 执行，不接入也不依赖 Home Assistant。Provider 接受只表示已提交。正式服务器是 `120.55.64.225`；`139.196.94.58` 只是旧 DeepSeek Webhook，禁止覆盖。
 
 完整的软件说明、技术栈、UML、ER 图、接口总表和部署指南请阅读仓库根目录 `README.md`。
 
-当前版本负责已登录用户的实时语音对话、六模型文字对话、自动续接、账号长期记忆和智能家居 Agent。v1.1.1 使用 LangGraph 单总控、`qwen3.8-max` Function Calling、确定性安全策略与环境工具，把低风险计划转换为待确认事件；疲劳、压力和想放松固定建议休息、补水，并可选择播放舒缓轻音乐，模型后安全闸禁止误换为空调。用户同意后由 T10S Android 通过天猫精灵内部 `GenieApi / method=15` 文字指令控制已绑定家电或调用音乐播放。Home Assistant 当前未接入且不是控制前置条件；未来的传感器或网关只作为可选状态来源。
+当前版本负责已登录用户的实时语音对话、六模型文字对话、自动续接、账号长期记忆和智能家居 Agent。v1.1.2 使用 LangGraph 单总控、`qwen3.8-max` Function Calling、确定性安全策略与环境工具，把低风险计划转换为待确认事件；疲劳、压力和想放松先建议休息、补水，再按室内状态、室外天气和上一轮方案，从当前合理的空调、风扇、音乐播放器中做轻度随机选择。用户可自然同意、拒绝、追加动作、换方案、发起新请求、重新唤醒或结束对话；只有最终确认的明确命令才由 T10S Android 提交。Home Assistant 当前未接入且不是控制前置条件；未来的传感器或网关只作为可选状态来源。
 
 ## 一键启动
 
-推荐 Python 3.11 或 3.12。Docker 固定使用 Python 3.11；暂不建议用 Python 3.14 运行 LangGraph/LangChain Core。
+本机默认使用现有 `C:\Users\29556\.conda\envs\yolo\python.exe`（Python 3.14.4）测试，不再为普通回归临时创建环境。Docker 固定到官方 `python:3.14.6-slim`；本轮依赖安装、镜像构建及 `110 passed` 均通过。线上若出现 3.14 特有问题，回滚基础镜像到 Python 3.11。
 
 ```powershell
 cd E:\无锡捷普迅智能科技有限公司\天猫精灵\天猫精灵安卓APK\RuoYi\ruoyi-fastapi
 pip install -r requirements.txt
-Copy-Item .env.example .env
-# 编辑 .env，填写 DASHSCOPE_API_KEY，并确认若依 /getInfo 地址
+# 可选：在 PyCharm/系统环境变量中设置 DASHSCOPE_API_KEY；不要修改并提交真实 Key
 # 旧数据库升级时执行 ..\sql\tmall-smart-home-assistant-upgrade.sql
 python main.py
 ```
@@ -33,10 +32,12 @@ python main.py
 - Agent 能力目录：`GET http://127.0.0.1:8001/api/v1/agent/capabilities`
 - Agent 规划调试：`POST http://127.0.0.1:8001/api/v1/agent/plan`（需要 RuoYi Token，只返回计划，不直接越过客户端执行）
 
-`main.py` 会自动读取同目录下的 `.env`；`.env` 已被 `.gitignore` 排除，API Key 不会进入源码。
-从公司 Gitea 首次克隆后，即使尚未创建 `.env`，本地 MySQL 也会按团队开发约定使用
-`root / 123456` 连接 `127.0.0.1:3306/ry-cat`。仍建议先复制 `.env.example`，以便填写
-`DASHSCOPE_API_KEY` 和覆盖个人环境中的数据库地址；生产环境必须通过环境变量使用独立强密码。
+`main.py` 会自动读取同目录下已提交且脱敏的 `.env`。从 GitHub/Gitea 首次克隆后，
+本地 MySQL 会直接按团队开发约定使用 `root / 123456` 连接
+`127.0.0.1:3306/ry-cat`，不需要复制模板或修改数据库地址。系统/PyCharm 环境变量优先于
+`.env`，因此真实 `DASHSCOPE_API_KEY` 只在个人运行配置或生产密钥环境中注入，不进入 Git。
+没有 Key 时 FastAPI、健康检查和数据库链路可以启动，实时语音/文字模型/Agent 的外部调用不可用。
+生产环境必须通过服务器独立环境变量使用强密码和真实 Key，不能复用仓库开发值。
 若已有语音会话表但缺少 `ai_user_memory`，服务会自动创建这张助手自管表，便于开发环境一键启动。
 
 ## HBuilderX H5 查看
@@ -52,7 +53,7 @@ python main.py
 
 ## 常见开发问题
 
-- `GET /api/v1/memories 404`：通常是修改源码后仍在运行旧 FastAPI 进程。结束原来的 `main.py`，重新启动后确认根接口返回当前产品版本 `1.1.1`，并在 `/docs` 中看到记忆路由。`OPTIONS 200` 只说明 CORS 中间件响应正常，不能证明业务路由已加载。
+- `GET /api/v1/memories 404`：通常是修改源码后仍在运行旧 FastAPI 进程。结束原来的 `main.py`，重新启动后确认根接口返回当前产品版本 `1.1.2`，并在 `/docs` 中看到记忆路由。`OPTIONS 200` 只说明 CORS 中间件响应正常，不能证明业务路由已加载。
 - 浏览器提示 `ScriptProcessorNode is deprecated`：这是 AudioWorklet 静态文件未加载时的兼容回退警告，不会中断语音。停止并重新运行 HBuilderX H5、执行一次强制刷新；当前页面会尝试应用路径、站点根路径和 Blob 三种方式加载 AudioWorklet。
 
 ## 实时链路
@@ -163,7 +164,7 @@ Omni 最终转写
 
 - Agent 的 `execute` 只表示可以向用户提出执行建议，不会立即向 Android 发送指令；只有处于待确认状态且用户明确同意后才发送。明确拒绝会取消并恢复休眠，含糊答复会要求用户明确说“执行”或“取消”。
 - `advise`、`clarify`、`blocked`、`not_applicable`、异常和超时均不会执行。
-- 疲劳、压力/烦躁和想放松可形成 `音乐播放器/play` 的待确认方案，固定命令“播放一首舒缓的轻音乐”，不得替换为空调；困倦、睡眠、口渴、饥饿、头痛和噪声仍属于 `advise`。胸痛、呼吸困难、昏厥等只给安全求助提醒，均不映射成家电动作。
+- 疲劳、压力/烦躁和想放松会先给休息、补水建议，并可在环境适合时形成空调、风扇或音乐播放器的待确认方案；选择带有轻度随机性，但必须通过温度/天气适用性闸门。“换个方案”优先排除上一设备。胸痛、呼吸困难、昏厥等只给安全求助提醒，均不映射成家电动作。
 - 门锁、燃气、烹饪加热和安防等高风险设备在模型调用前即被确定性策略拦截。
 - 空调在用户未指定温度时先查询当地天气；灯光在没有真实传感器时使用低可信、明确标记为模拟的照度。
 - 用户明确给出的安全参数优先；长期记忆仅作为偏好参考，不能充当授权、不能覆盖本轮命令或安全规则。

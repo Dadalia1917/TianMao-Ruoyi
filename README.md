@@ -8,15 +8,15 @@
 | --- | --- |
 | 产品名称 | 天猫智家·千问智能语音助手 |
 | English name | Tmall Smart Home Qwen Voice Assistant |
-| 产品版本 | **v1.1.1** |
-| 版本更新时间 | **2026 年 8 月 14 日 20:04:17（UTC+8）** |
-| 文档交接更新时间 | **2026 年 8 月 17 日 09:54:24（UTC+8）** |
-| 当前阶段 | v1.1.1 联动版已发布：AI-Agent 音乐放松场景与语音采集/回灌保护已合并，T10S 和阿里云均已更新并验收 |
+| 产品版本 | **v1.1.2** |
+| 版本更新时间 | **2026.08.17（UTC+8）** |
+| 文档交接更新时间 | **2026.08.17（UTC+8）** |
+| 当前阶段 | v1.1.2 Agent、T10S APK 与正式阿里云三项业务服务已完成并验收 |
 | 适用终端 | 天猫智慧工控屏、Android、桌面 H5 |
 | 开发单位 | 无锡捷普迅智能科技有限公司 |
 | 基础框架 | RuoYi 3.9.2 派生工程 |
 
-> 版本说明：**v1.1.1 是本产品版本**；Maven 和 ruoyi-ui 中的 3.9.2 是继承的 RuoYi 工程/依赖版本，两者含义不同，不应互相替换。
+> 版本说明：**v1.1.2 是本产品版本**；Maven 和 ruoyi-ui 中的 3.9.2 是继承的 RuoYi 工程/依赖版本，两者含义不同，不应互相替换。
 
 ## 核心技术架构
 
@@ -27,7 +27,7 @@
 | 运营管理前端 | `ruoyi-ui/` | **Vue 3.5.26**、Vite 6.4.3、Element Plus 2.13.1、Pinia 3、Axios | 用户、权限、语音会话、长期记忆和运营数据管理 |
 | 消费者端 App/H5 | `ruoyi-app/` | **uni-app 3、Vue 3.4.21**、Vite 5.2.8、Pinia 2.1.7、Android WebView/原生桥 | Android、天猫智慧工控屏与 H5 的登录、实时语音、文字聊天和本机家居控制 |
 | Java 业务后端 | `ruoyi-admin/`、`ruoyi-framework/`、`ruoyi-system/`、`ruoyi-common/` | **Java 26、Spring Boot 4.0.6**、Spring Security、MyBatis Starter 4.0.1、Druid | 账号认证、RBAC 权限、运营接口、会话与长期记忆数据管理 |
-| AI 语音与 Agent 服务 | `ruoyi-fastapi/` | **Anaconda/Conda Python 3.14、FastAPI 0.115+、LangGraph 1.x StateGraph**、Pydantic 2、Uvicorn、WebSocket、HTTPX | 开发端以 Python 3.14 为升级基线；云端 Docker 保持 Python 3.11；负责实时语音代理、模型路由、Agent 编排和记忆提取 |
+| AI 语音与 Agent 服务 | `ruoyi-fastapi/` | **Anaconda/Conda Python 3.14、Docker Python 3.14.6、FastAPI 0.115+、LangGraph 1.x StateGraph**、Pydantic 2、Uvicorn、WebSocket、HTTPX | 本机 YOLO 环境与云端镜像统一到 Python 3.14 系列；负责实时语音代理、模型路由、Agent 编排和记忆提取 |
 | 数据与部署 | `sql/`、`ruoyi-docker/` | MySQL 8、Redis 6、Docker Compose、Caddy 2 | 数据持久化、Token 缓存、容器编排、HTTPS/WSS 与反向代理 |
 
 ~~~text
@@ -40,11 +40,12 @@ uni-app 3 消费者端 ───┘               │
 
 > Java 版本说明：当前开发运行环境使用 **JDK 26.0.1**。Maven `pom.xml` 与生产 Docker 镜像仍保留 Java 17 字节码/运行时兼容配置；如要让构建产物仅面向 Java 26，应同步调整 Maven 编译目标和 Docker 基础镜像后再执行完整回归测试。
 
-> Python 版本说明：开发端正在迁移到 **Anaconda/Conda Python 3.14**，新建环境和后续兼容验证均以 3.14 为目标；当前云端 `fastapi.Dockerfile` 继续使用稳定的 **Python 3.11** 镜像。开发端与云端版本有意分离，依赖变更必须同时完成 Python 3.14 开发环境测试和 Python 3.11 容器回归测试。
+> Python 版本说明：本机默认复用已有 YOLO Conda **Python 3.14.4** 环境进行只读测试，不再临时新建 Python 环境；`fastapi.Dockerfile` 已升级为官方 **Python 3.14.6-slim**。2026.08.17 本机 `110 passed`，Linux 镜像依赖安装与构建成功。若以后线上健康检查或业务回归出现 3.14 特有问题，再把基础镜像回滚到 3.11。
 
 ## 文档导航
 
 - [核心技术架构](#核心技术架构)
+- [v1.1.2 发布说明](#v112-发布说明与验收)
 - [v1.1.0 更新说明](#1-v110-更新说明)
 - [v1.1.1 发布说明与验收](#13-v111-发布说明与验收)
 - [软件说明与需求](#2-软件说明)
@@ -58,6 +59,19 @@ uni-app 3 消费者端 ───┘               │
 - [并发、安全、测试与后续路线](#15-高并发与解耦设计)
 - [开发交接约定](#19-开发交接约定)
 - [APK 打包前待办清单](#22-v101-待办apk-打包前问题清单)
+
+---
+
+## v1.1.2 发布说明与验收
+
+发布日期：**2026.08.17（UTC+8）**
+
+- 放松类场景从“写死音乐”改为有界智能选择：Agent 综合室内温湿度、室外天气、设备状态和上一轮方案，只在当前合理的空调、风扇、音乐播放器中做轻度随机选择；“换个方案”会避开上一方案。温度不适合时不会为了随机性强开空调或风扇。
+- 设备建议一律先询问是否执行。待确认阶段支持自然表达：同意、拒绝、同意并追加动作、修改/更换方案、直接提出新请求、重新说“管家”开始、说“结束对话”退出。追加动作通过同一 Agent 安全规划后，用“并且”组成一条天猫精灵内部命令。
+- 执行链仍为 `状态取证 → Qwen3.8-Max 规划 → 建议 → 用户确认 → T10S GenieApi / method=15 → 回执`；不使用 Home Assistant。执行、取消或结束后都回到等待“管家”，Provider 接受只播报“已提交”，不伪报实体设备成功。
+- FastAPI 在现有 YOLO Conda Python 3.14.4 下通过 `110 passed`；官方 `python:3.14.6-slim` AI 网关镜像构建成功，因此 Dockerfile 保留 3.14.6。YOLO 环境存在一条 LangChain Pydantic V1 兼容层警告，但不影响本轮测试；未改动该 Conda 环境。
+- H5/App 构建与 Android Release 成功。正式 APK 为 `ruoyi-app/apk/天猫智家语音助手-v1.1.2.apk`，`versionCode=112`，大小 1,621,555 字节，SHA-256 `9CE3F9F3993F43FD41E998BD165688BD6ACE7A19E08EBABD926FF33090F8E8BE`，v1/v2 签名有效；`192.168.3.234:5555` 已覆盖安装并确认 `MainActivity` 与进程正常，未擅自触发真实家电或音乐。
+- 正式云端 `120.55.64.225:/opt/tmall-smart-home` 已上传 v1.1.2 并完成三镜像构建/切换；AI 网关实际为 Python 3.14.6，内部健康检查返回 `version=1.1.2`、数据库/记忆/文字对话/Agent 全部 ready，T10S 实时 WebSocket 已重连。云端只保留经包内 `APP_VERSION=1.1.1` 核验的 `backups/rollback-v1.1.1-20260817-101501.tar.gz`，可回滚 Python 3.11 与旧服务。`139.196.94.58:/opt/tmall-genie-ai` 仅为旧 DeepSeek Webhook，本轮未改动。
 
 ---
 
@@ -844,7 +858,7 @@ erDiagram
 | 浏览器音频 | Web Audio API、WebSocket | PCM 16-bit 单声道；输入 16kHz，输出 24kHz |
 | 运营后台 | Vue 3、Vite、Element Plus、Pinia、Axios、ECharts | Vue 3.5.26、Vite 6.4.3、Element Plus 2.13.1 |
 | Java 服务 | Java、Spring Boot、Spring Security、MyBatis、Druid | 当前开发运行 JDK 26.0.1；Spring Boot 4.0.6、MyBatis Starter 4.0.1 |
-| AI 网关 | Anaconda/Conda Python、FastAPI、Uvicorn、websockets、httpx、aiomysql | 开发端升级基线 Python 3.14；云端 Docker Python 3.11；FastAPI 0.115+ |
+| AI 网关 | Anaconda/Conda Python、FastAPI、Uvicorn、websockets、httpx、aiomysql | 本机 YOLO Python 3.14.4；Docker Python 3.14.6-slim；FastAPI 0.115+ |
 | 智能家居 Agent | LangGraph 1.x StateGraph、Pydantic 2、Qwen Function Calling | 单总控 + 有界工具；天气实时数据 + 模拟照度；确定性安全校验 |
 | 实时模型 | Qwen3.5 Omni Realtime | qwen3.5-omni-plus-realtime，默认音色 Ethan |
 | Agent 规划模型 | Qwen3.8-Max | `qwen3.8-max`；当前百炼账号 Function Calling 已实测 |
@@ -981,7 +995,7 @@ Content-Type: application/json
 - Maven 3.9+
 - MySQL 8.0+
 - Redis 6.0+
-- Anaconda 或 Miniconda；开发端使用 Python 3.14，云端 Docker 使用 Python 3.11
+- Anaconda 或 Miniconda；本机默认使用现有 `yolo` Python 3.14.4，Docker 使用 Python 3.14.6-slim
 - Node.js 20+ 与 npm
 - HBuilderX 5.23 或兼容版本
 
@@ -989,10 +1003,17 @@ Content-Type: application/json
 
 1. 创建数据库 <code>ry-cat</code>，字符集使用 <code>utf8mb4</code>。
 2. 新环境导入 <code>sql/ry-cat.sql</code>。
-3. 检查 <code>ruoyi-admin/src/main/resources/application-druid.yml</code> 的数据库连接。
-4. 启动 Redis，并检查 Java 的 Redis 配置。
+3. 本地统一使用 <code>127.0.0.1:3306 / root / 123456</code>；Java、FastAPI 和已提交的开发 <code>.env</code> 已对齐，无需修改配置文件。
+4. 启动本机 Redis（默认 <code>127.0.0.1:6379</code>、无密码）。
+
+已提交的 <code>.env</code> 只包含可公开的本地开发值。真实百炼/DeepSeek Key、生产数据库密码、Token 和 SSH 私钥不得提交；AI 联调 Key 应通过 PyCharm/IDEA 的运行环境变量注入，环境变量会优先于文件值。
 
 ### 13.3 启动 Java 服务
+
+IDEA 首次打开根目录 <code>pom.xml</code> 后选择“作为 Maven 项目加载”，等待依赖索引完成，
+从运行下拉框选择仓库自带的 <code>RuoYiApplication</code>。源码入口为
+<code>ruoyi-admin/src/main/java/com/ruoyi/RuoYiApplication.java</code>；不要打开或运行
+<code>ruoyi-admin/target</code> 中的反编译 <code>.class</code>。
 
 ~~~powershell
 cd E:\无锡捷普迅智能科技有限公司\天猫精灵\天猫精灵安卓APK\RuoYi
@@ -1007,14 +1028,13 @@ mvn -pl ruoyi-admin -am spring-boot:run -DskipTests
 conda create -n tmall-ruoyi-ai python=3.14 -y
 conda activate tmall-ruoyi-ai
 cd E:\无锡捷普迅智能科技有限公司\天猫精灵\天猫精灵安卓APK\RuoYi\ruoyi-fastapi
-Copy-Item .env.example .env
 python -m pip install -r requirements.txt
 python main.py
 ~~~
 
-开发端新环境统一使用上述 Python 3.14 Conda 环境；云端部署不复用本机环境，仍由 `ruoyi-docker/dockerfiles/fastapi.Dockerfile` 中的 Python 3.11 镜像独立构建。升级或新增依赖时，两套版本都必须通过测试。
+开发端默认使用现有 `C:\Users\29556\.conda\envs\yolo` Python 3.14 环境，不再为普通回归临时创建环境；云端仍由 `ruoyi-docker/dockerfiles/fastapi.Dockerfile` 中的 Python 3.14.6-slim 镜像独立构建。升级或新增依赖时，应至少完成本机测试和镜像构建；线上出现 3.14 特有问题时回滚到 Python 3.11。
 
-在 <code>.env</code> 中填写有效的 <code>DASHSCOPE_API_KEY</code>。不要把真实 Key 写进 README、提交到 Git 或打包进客户端。
+数据库配置无需修改。如需调用实时语音、文字模型或 Agent，在 PyCharm/系统运行环境变量中填写有效的 <code>DASHSCOPE_API_KEY</code>；不要把真实 Key 写进已提交的 <code>.env</code>、README 或客户端。没有 Key 时服务和本地数据库链路仍可启动，但外部模型调用不可用。
 
 默认地址：<code>http://127.0.0.1:8001</code>
 
@@ -1048,14 +1068,14 @@ npm run dev
 5. 消费者端 H5（9090）
 6. 运营后台（9091）
 
-### 13.8 Android v1.1.1 联动正式包
+### 13.8 Android v1.1.2 Agent 联动正式包
 
 - 原生工程：`ruoyi-app/android-native`
 - 应用包名：`com.jpx.tmallsmarthome`
 - 最低系统：Android 6.0（API 23）
 - 已验收设备：天猫精灵智慧屏 T10S，Android 10、1280×800 横屏、arm64-v8a
-- 当前正式安装包：`ruoyi-app/apk/天猫智家语音助手-v1.1.1.apk`
-- 当前本地、T10S 与云端归档包版本/哈希：`versionCode=111`；SHA-256 `988B84AF6740FF0FD60907AC9B946412B6AD409E20EF6E3D6F4341A82650F458`
+- 当前正式安装包：`ruoyi-app/apk/天猫智家语音助手-v1.1.2.apk`
+- 当前本地、T10S 与云端源码归档包版本/哈希：`versionCode=112`；SHA-256 `9CE3F9F3993F43FD41E998BD165688BD6ACE7A19E08EBABD926FF33090F8E8BE`
 - 覆盖安装结果：T10S `192.168.3.234:5555` 返回 `Success`，包版本与进程状态正常；未发送真实音乐或家电动作测试指令
 - 拉起方式：Launcher Activity 或 `smartbutler://voice`
 
@@ -1089,12 +1109,12 @@ sh ruoyi-docker/scripts/deploy.sh
 | 云端工程目录 | `/opt/tmall-smart-home` |
 | Compose 文件 | `/opt/tmall-smart-home/compose.yaml` |
 | 生产环境变量 | `/opt/tmall-smart-home/deploy/docker/.env`（权限 600） |
-| 本机私钥路径 | `D:\Download\天猫精灵AI开发密钥.pem` |
+| 本机私钥路径 | `E:\无锡捷普迅智能科技有限公司\天猫精灵\天猫精灵安卓APK\tianmao-RuoYi.pem` |
 
 PowerShell 直连：
 
 ```powershell
-ssh -i "D:\Download\天猫精灵AI开发密钥.pem" root@120.55.64.225
+ssh -i "E:\无锡捷普迅智能科技有限公司\天猫精灵\天猫精灵安卓APK\tianmao-RuoYi.pem" root@120.55.64.225
 ```
 
 VS Code 的 `%USERPROFILE%\.ssh\config` 可加入：
@@ -1129,7 +1149,7 @@ curl -fsS http://127.0.0.1/health/ready
 
 - <code>baseUrl</code>：Java API 地址。
 - <code>assistant.baseUrl</code>：FastAPI AI 网关地址。
-- <code>appInfo.version</code>：当前产品版本，v1.1.1。
+- <code>appInfo.version</code>：当前产品版本，v1.1.2。
 
 这些值在消费者界面中不提供编辑入口。
 
@@ -1287,12 +1307,12 @@ npm run build:prod
 
 | 项目 | 基线 |
 | --- | --- |
-| 产品/服务/APK | v1.1.1 |
-| 云端状态 | Java、FastAPI、Web 网关均已部署 v1.1.1；公网健康检查 ready |
-| T10S | 已安装签名 v1.1.1（versionCode 111）；包名 `com.jpx.tmallsmarthome` |
-| 语音与 Agent 联动正式包 | `versionCode=111`，SHA-256 `988B84AF6740FF0FD60907AC9B946412B6AD409E20EF6E3D6F4341A82650F458`；T10S 与云端均已更新 |
+| 产品/服务/APK | v1.1.2 |
+| 云端状态 | 正式 120 服务器的 Java、FastAPI、Web 网关均为 v1.1.2；Python 3.14.6；内部健康检查 ready |
+| T10S | 已安装签名 v1.1.2（versionCode 112）；包名 `com.jpx.tmallsmarthome` |
+| 语音与 Agent 联动正式包 | `versionCode=112`，SHA-256 `9CE3F9F3993F43FD41E998BD165688BD6ACE7A19E08EBABD926FF33090F8E8BE`；本地与 T10S 已更新 |
 | 家电控制 | T10S 天猫精灵内部 `GenieApi / method=15` 文字指令；不依赖 Home Assistant |
-| 数据库 | v1.1.1 无 MySQL 迁移；短时家庭状态继续使用 Redis |
+| 数据库 | v1.1.2 无 MySQL 迁移；短时家庭状态继续使用 Redis |
 | 后续边界 | 可选接入传感器/网关补充物理状态反馈，不替换现有天猫精灵控制通道 |
 
 ### 19.2 通用交接规则
