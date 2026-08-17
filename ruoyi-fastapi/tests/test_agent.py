@@ -263,6 +263,20 @@ def test_relaxation_fallback_varies_between_equally_safe_devices(monkeypatch):
     assert fan.action.device != music.action.device
 
 
+def test_repeated_relaxation_request_rotates_away_from_previous_device(monkeypatch):
+    agent = build_agent(monkeypatch)
+    agent._rng = FixedChoice(-1)
+
+    first = run_plan(agent, AgentRequest(transcript="我累了", user_id="same-user"))
+    second = run_plan(agent, AgentRequest(transcript="我累了", user_id="same-user"))
+
+    assert first.action is not None
+    assert second.action is not None
+    assert first.action.device == "音乐播放器"
+    assert second.action.device in {"空调", "风扇"}
+    assert second.action.device != first.action.device
+
+
 def test_relaxation_can_recommend_air_conditioner_strong_mode(monkeypatch):
     agent = build_agent(monkeypatch)
     agent._rng = FixedChoice(1)

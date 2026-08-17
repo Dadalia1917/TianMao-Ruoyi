@@ -628,6 +628,42 @@
           return false
         }
       },
+      sleep(milliseconds) {
+        return new Promise(resolve => setTimeout(resolve, Math.max(0, Number(milliseconds) || 0)))
+      },
+      isMusicHomeCommand(command) {
+        const value = String(command || '')
+        return /(播放|放|来|听).{0,8}(音乐|歌曲|歌|轻音乐)|音乐播放器/.test(value)
+      },
+      nativeMusicActive() {
+        try {
+          if (!window.GenieBridge || typeof window.GenieBridge.isMusicActive !== 'function') return null
+          return Boolean(window.GenieBridge.isMusicActive())
+        } catch (error) {
+          return null
+        }
+      },
+      async waitForTmallMusicPlayback(options = {}) {
+        const timeoutMs = Math.max(1000, Number(options.timeoutMs) || 12000)
+        const minSettleMs = Math.max(0, Number(options.minSettleMs) || 0)
+        const stableMs = Math.max(0, Number(options.stableMs) || 1200)
+        const startedAt = Date.now()
+        let activeSince = 0
+        let bridgeSupported = true
+        while (Date.now() - startedAt < timeoutMs) {
+          const active = this.nativeMusicActive()
+          if (active === null) {
+            bridgeSupported = false
+          } else if (active && Date.now() - startedAt >= minSettleMs) {
+            if (!activeSince) activeSince = Date.now()
+            if (Date.now() - activeSince >= stableMs) return true
+          } else {
+            activeSince = 0
+          }
+          await this.sleep(300)
+        }
+        return bridgeSupported ? false : null
+      },
       sendHomeCommandResult(event, status, message, command) {
         if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return
         try {
@@ -668,7 +704,7 @@
         this.relaySafetyTimer = setTimeout(() => {
           this.resetAcousticRelay()
           this.emit({ type: 'playback.done' })
-        }, 20000)
+        }, Math.max(30000, 30000 + commands.length * 15000))
         this.emit({
           type: 'home.command.started',
           command,
@@ -678,14 +714,23 @@
           evidence: (event && event.evidence) || []
         })
         const acceptedCommands = []
+        const musicCommands = commands.filter(item => this.isMusicHomeCommand(item))
+        // T10S exposes one Genie conversational command channel.  Appliance
+        // replies temporarily take audio focus, so keep the semantic plan intact
+        // but submit media commands last.  This leaves both the appliance state
+        // and the requested music active after a combined execution.
+        const executionCommands = [
+          ...commands.filter(item => !this.isMusicHomeCommand(item)),
+          ...musicCommands
+        ]
         let activeCommand = ''
         try {
-          for (let index = 0; index < commands.length; index += 1) {
-            activeCommand = commands[index]
-            if (index > 0) {
-              // Give the T10S internal recognizer a short gap so one utterance
-              // cannot overwrite the previous item in a multi-action plan.
-              await new Promise(resolve => setTimeout(resolve, 650))
+          for (let index = 0; index < executionCommands.length; index += 1) {
+            activeCommand = executionCommands[index]
+            if (index > 0 && !this.isMusicHomeCommand(executionCommands[index - 1])) {
+              // Non-music requests also use an asynchronous Tianmao session.
+              // Leave enough time for the preceding request and reply to finish.
+              await this.sleep(6500)
             }
             const rawResult = window.GenieBridge.sendToGenie(activeCommand)
             const result = typeof rawResult === 'string' ? JSON.parse(rawResult) : rawResult
@@ -693,18 +738,63 @@
               throw new Error((result && result.message) || '天猫精灵未接受该指令')
             }
             acceptedCommands.push(activeCommand)
+            if (this.isMusicHomeCommand(activeCommand) && index < executionCommands.length - 1) {
+              // ContentResolver acceptance is not playback confirmation. On T10S,
+              // sending the next request while ContentPlay is still being created
+              // leaves the media session paused. Wait until music has had time to
+              // establish a stable audio session before continuing the plan.
+              const started = await this.waitForTmallMusicPlayback({
+                timeoutMs: 14000,
+                minSettleMs: 5500,
+                stableMs: 1200
+              })
+              if (started === null) await this.sleep(6500)
+            }
           }
+
+          let musicVerified = false
+          if (musicCommands.length) {
+            // Music is deliberately submitted last; confirm it established a
+            // sustained local audio session before reporting the combined plan.
+            let playing = await this.waitForTmallMusicPlayback({
+              timeoutMs: 14000,
+              minSettleMs: 5500,
+              stableMs: 1500
+            })
+            if (playing === false) {
+              // Retry only the requested music action once. Other appliances have
+              // already been submitted and must not be duplicated.
+              activeCommand = musicCommands[musicCommands.length - 1]
+              const retryRawResult = window.GenieBridge.sendToGenie(activeCommand)
+              const retryResult = typeof retryRawResult === 'string'
+                ? JSON.parse(retryRawResult)
+                : retryRawResult
+              if (!retryResult || retryResult.accepted !== true) {
+                throw new Error((retryResult && retryResult.message) || '音乐恢复指令未被天猫精灵接受')
+              }
+              playing = await this.waitForTmallMusicPlayback({
+                timeoutMs: 14000,
+                minSettleMs: 5500,
+                stableMs: 1500
+              })
+              if (playing === false) throw new Error('音乐指令已提交，但本机未检测到持续播放')
+            }
+            musicVerified = playing === true
+          }
+          const resultMessage = musicVerified
+            ? `${acceptedCommands.length} 项指令已分别提交给天猫精灵，已确认音乐正在播放`
+            : `${acceptedCommands.length} 项指令已分别提交给天猫精灵`
           this.sendHomeCommandResult(
             event,
             'accepted_unverified',
-            `${acceptedCommands.length} 项指令已分别提交给天猫精灵`,
+            resultMessage,
             command
           )
           this.emit({
             type: 'home.command.accepted',
             command,
             commands: acceptedCommands,
-            message: `${acceptedCommands.length} 项指令已分别提交给天猫精灵`
+            message: resultMessage
           })
         } catch (error) {
           const partial = acceptedCommands.length > 0

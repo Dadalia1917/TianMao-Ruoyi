@@ -169,9 +169,32 @@ def extract_pending_home_addition(transcript: str) -> str:
         r"(?P<request>.+)$",
         text,
     )
-    if not match:
-        return ""
-    request = str(match.group("request") or "").strip("，,。.!！?？;；：:、 ")
+    if match:
+        request = str(match.group("request") or "")
+    else:
+        # The user may repeat the proposed action before adding another one,
+        # for example: “可以帮我播放音乐，并且帮我打开空调”.  Only peel off
+        # the trailing clause when it is independently actionable.  Requiring
+        # both a device and an action prevents “打开空调并且设置为26度” from
+        # being misread as a second, device-less request.
+        embedded = re.search(
+            r"(?:[，,。;；\s]+)?(?:并且|同时|顺便|顺带|另外|还要)"
+            r"(?:可以)?(?P<request>.+)$",
+            text,
+        )
+        if not embedded:
+            return ""
+        request = str(embedded.group("request") or "")
+        if not re.search(
+            r"(?:空调|风扇|新风|灯|照明|窗帘|纱帘|百叶帘|电视|投影|"
+            r"空气净化|加湿|扫地机器人|插座|音乐|歌曲|歌|播放器)",
+            request,
+        ) or not re.search(
+            r"(?:开|关|播放|放|来|听|设置|调|启动|停止)",
+            request,
+        ):
+            return ""
+    request = request.strip("，,。.!！?？;；：:、 ")
     request = re.sub(r"^(?:请|麻烦|可以)?(?:再)?", "", request).strip()
     return request[:500]
 

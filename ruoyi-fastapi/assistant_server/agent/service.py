@@ -91,6 +91,10 @@ class HouseholdAgentService:
         self._client: httpx.AsyncClient | None = None
         self._data_tools: HouseholdDataTools | None = None
         self._rng = random.SystemRandom()
+        # Avoid repeating the same relaxation device for consecutive requests
+        # from one user when another contextually safe option exists.  This is
+        # intentionally bounded because the gateway is a long-running service.
+        self._recent_relaxation_devices: dict[str, str] = {}
         self._intent_handlers = IntentHandlerRegistry(default_intent_handlers())
         self._state_store = HouseholdStateStore(
             ttl_seconds=settings.agent_household_state_ttl_seconds,
@@ -583,9 +587,7 @@ class HouseholdAgentService:
         effective_state: AgentState = state
         device = state.get("device", "")
         if is_relaxation:
-            previous_device = self._previous_relaxation_device(
-                state["request"].transcript
-            )
+            previous_device = self._recent_relaxation_device(state)
             if (
                 previous_device and planned_device == previous_device
             ) or not self._relaxation_device_is_contextually_allowed(
@@ -660,6 +662,8 @@ class HouseholdAgentService:
             risk_level=effective_state.get("risk_level", RiskLevel.L1),
             requires_confirmation=True,
         )
+        if is_relaxation:
+            self._remember_relaxation_device(state["request"].user_id, device)
         return {
             "decision": self._base_decision(
                 state,
@@ -757,9 +761,7 @@ class HouseholdAgentService:
             candidates = ("音乐播放器", "风扇", "音乐播放器")
         else:
             candidates = ("音乐播放器",)
-        previous_device = self._previous_relaxation_device(
-            state["request"].transcript
-        )
+        previous_device = self._recent_relaxation_device(state)
         if previous_device:
             alternatives = tuple(item for item in candidates if item != previous_device)
             if alternatives:
@@ -825,6 +827,22 @@ class HouseholdAgentService:
             ),
             "",
         )
+
+    def _recent_relaxation_device(self, state: AgentState) -> str:
+        explicit = self._previous_relaxation_device(state["request"].transcript)
+        if explicit:
+            return explicit
+        return self._recent_relaxation_devices.get(state["request"].user_id, "")
+
+    def _remember_relaxation_device(self, user_id: str, device: str) -> None:
+        if not user_id or device not in _RELAXATION_DEVICES:
+            return
+        # Reinsert an existing key so the dictionary keeps recent-use order.
+        self._recent_relaxation_devices.pop(user_id, None)
+        self._recent_relaxation_devices[user_id] = device
+        while len(self._recent_relaxation_devices) > 2048:
+            oldest_user_id = next(iter(self._recent_relaxation_devices))
+            self._recent_relaxation_devices.pop(oldest_user_id)
 
     @staticmethod
     def _relaxation_device_is_contextually_allowed(
