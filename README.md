@@ -10,7 +10,7 @@
 | English name | Tmall Smart Home Qwen Voice Assistant |
 | 产品版本 | **v1.1.1** |
 | 版本更新时间 | **2026 年 8 月 14 日 20:04:17（UTC+8）** |
-| 文档交接更新时间 | **2026 年 8 月 17 日 09:49:28（UTC+8）** |
+| 文档交接更新时间 | **2026 年 8 月 17 日 09:54:24（UTC+8）** |
 | 当前阶段 | v1.1.1 联动版已发布：AI-Agent 音乐放松场景与语音采集/回灌保护已合并，T10S 和阿里云均已更新并验收 |
 | 适用终端 | 天猫智慧工控屏、Android、桌面 H5 |
 | 开发单位 | 无锡捷普迅智能科技有限公司 |
@@ -27,7 +27,7 @@
 | 运营管理前端 | `ruoyi-ui/` | **Vue 3.5.26**、Vite 6.4.3、Element Plus 2.13.1、Pinia 3、Axios | 用户、权限、语音会话、长期记忆和运营数据管理 |
 | 消费者端 App/H5 | `ruoyi-app/` | **uni-app 3、Vue 3.4.21**、Vite 5.2.8、Pinia 2.1.7、Android WebView/原生桥 | Android、天猫智慧工控屏与 H5 的登录、实时语音、文字聊天和本机家居控制 |
 | Java 业务后端 | `ruoyi-admin/`、`ruoyi-framework/`、`ruoyi-system/`、`ruoyi-common/` | **Java 26、Spring Boot 4.0.6**、Spring Security、MyBatis Starter 4.0.1、Druid | 账号认证、RBAC 权限、运营接口、会话与长期记忆数据管理 |
-| AI 语音与 Agent 服务 | `ruoyi-fastapi/` | **FastAPI 0.115+、LangGraph 1.x StateGraph**、Pydantic 2、Uvicorn、WebSocket、HTTPX | Qwen3.5 Omni 实时语音代理、文字模型路由、Agent 工具编排、安全校验和记忆提取 |
+| AI 语音与 Agent 服务 | `ruoyi-fastapi/` | **Anaconda/Conda Python 3.14、FastAPI 0.115+、LangGraph 1.x StateGraph**、Pydantic 2、Uvicorn、WebSocket、HTTPX | 开发端以 Python 3.14 为升级基线；云端 Docker 保持 Python 3.11；负责实时语音代理、模型路由、Agent 编排和记忆提取 |
 | 数据与部署 | `sql/`、`ruoyi-docker/` | MySQL 8、Redis 6、Docker Compose、Caddy 2 | 数据持久化、Token 缓存、容器编排、HTTPS/WSS 与反向代理 |
 
 ~~~text
@@ -39,6 +39,8 @@ uni-app 3 消费者端 ───┘               │
 ~~~
 
 > Java 版本说明：当前开发运行环境使用 **JDK 26.0.1**。Maven `pom.xml` 与生产 Docker 镜像仍保留 Java 17 字节码/运行时兼容配置；如要让构建产物仅面向 Java 26，应同步调整 Maven 编译目标和 Docker 基础镜像后再执行完整回归测试。
+
+> Python 版本说明：开发端正在迁移到 **Anaconda/Conda Python 3.14**，新建环境和后续兼容验证均以 3.14 为目标；当前云端 `fastapi.Dockerfile` 继续使用稳定的 **Python 3.11** 镜像。开发端与云端版本有意分离，依赖变更必须同时完成 Python 3.14 开发环境测试和 Python 3.11 容器回归测试。
 
 ## 文档导航
 
@@ -842,7 +844,7 @@ erDiagram
 | 浏览器音频 | Web Audio API、WebSocket | PCM 16-bit 单声道；输入 16kHz，输出 24kHz |
 | 运营后台 | Vue 3、Vite、Element Plus、Pinia、Axios、ECharts | Vue 3.5.26、Vite 6.4.3、Element Plus 2.13.1 |
 | Java 服务 | Java、Spring Boot、Spring Security、MyBatis、Druid | 当前开发运行 JDK 26.0.1；Spring Boot 4.0.6、MyBatis Starter 4.0.1 |
-| AI 网关 | Python、FastAPI、Uvicorn、websockets、httpx、aiomysql | 推荐 Python 3.11/3.12；Docker 使用 Python 3.11；FastAPI 0.115+ |
+| AI 网关 | Anaconda/Conda Python、FastAPI、Uvicorn、websockets、httpx、aiomysql | 开发端升级基线 Python 3.14；云端 Docker Python 3.11；FastAPI 0.115+ |
 | 智能家居 Agent | LangGraph 1.x StateGraph、Pydantic 2、Qwen Function Calling | 单总控 + 有界工具；天气实时数据 + 模拟照度；确定性安全校验 |
 | 实时模型 | Qwen3.5 Omni Realtime | qwen3.5-omni-plus-realtime，默认音色 Ethan |
 | Agent 规划模型 | Qwen3.8-Max | `qwen3.8-max`；当前百炼账号 Function Calling 已实测 |
@@ -979,7 +981,7 @@ Content-Type: application/json
 - Maven 3.9+
 - MySQL 8.0+
 - Redis 6.0+
-- Python 3.11 或 3.12（推荐；当前 LangChain Core 暂不建议 Python 3.14）
+- Anaconda 或 Miniconda；开发端使用 Python 3.14，云端 Docker 使用 Python 3.11
 - Node.js 20+ 与 npm
 - HBuilderX 5.23 或兼容版本
 
@@ -1002,11 +1004,15 @@ mvn -pl ruoyi-admin -am spring-boot:run -DskipTests
 ### 13.4 启动 FastAPI AI 网关
 
 ~~~powershell
+conda create -n tmall-ruoyi-ai python=3.14 -y
+conda activate tmall-ruoyi-ai
 cd E:\无锡捷普迅智能科技有限公司\天猫精灵\天猫精灵安卓APK\RuoYi\ruoyi-fastapi
 Copy-Item .env.example .env
 python -m pip install -r requirements.txt
 python main.py
 ~~~
+
+开发端新环境统一使用上述 Python 3.14 Conda 环境；云端部署不复用本机环境，仍由 `ruoyi-docker/dockerfiles/fastapi.Dockerfile` 中的 Python 3.11 镜像独立构建。升级或新增依赖时，两套版本都必须通过测试。
 
 在 <code>.env</code> 中填写有效的 <code>DASHSCOPE_API_KEY</code>。不要把真实 Key 写进 README、提交到 Git 或打包进客户端。
 
