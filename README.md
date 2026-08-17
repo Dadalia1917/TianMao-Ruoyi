@@ -45,9 +45,11 @@ uni-app 3 消费者端 ───┘               │
 ## 文档导航
 
 - [核心技术架构](#核心技术架构)
-- [v1.1.2 发布说明](#v112-发布说明与验收)
-- [v1.1.0 更新说明](#1-v110-更新说明)
-- [v1.1.1 发布说明与验收](#13-v111-发布说明与验收)
+- [版本发布记录](#版本发布记录v112--v100)
+  - [v1.1.2（当前版本）](#v112)
+  - [v1.1.1](#v111)
+  - [v1.1.0](#v110)
+  - [v1.0.0](#v100)
 - [软件说明与需求](#2-软件说明)
 - [UML 用例图](#4-uml-用例图)
 - [总体架构与软件工程图](#5-总体架构)
@@ -62,7 +64,123 @@ uni-app 3 消费者端 ───┘               │
 
 ---
 
-## v1.1.2 发布说明与验收
+## 版本发布记录（v1.1.2 → v1.0.0）
+
+本节统一按“新版本在前”的顺序记录。每个版本均明确列出更新时间、框架/技术基线、功能点和验收产物；下方折叠区仅保留早期原始验收文字，避免与当前版本顺序混在一起。
+
+| 版本 | 更新时间（UTC+8） | 框架/技术重点 | 版本定位 |
+| --- | --- | --- | --- |
+| **v1.1.2（当前）** | **2026.08.17** | Python 3.14、LangGraph、Qwen3.8-Max、T10S GenieApi | Agent 自由确认、多动作追加与有界智能选择正式版 |
+| v1.1.1 | 2026.08.14 20:04:17 | Qwen Function Calling、AudioWorklet、Provider 回执 | 情境 Agent、语音回灌抑制与真实提交回执版 |
+| v1.1.0 | 2026.08.14 18:22:47 | LangGraph StateGraph、Android ContentProvider | Agent 与 T10S 本机控制链路首个版本 |
+| v1.0.0 | 2026.08.11 | RuoYi、Vue 3、uni-app、FastAPI、Qwen3.5 Omni | 账号、语音、文字、记忆、运营后台和云端部署基线 |
+
+### v1.1.2
+
+更新时间：**2026.08.17（UTC+8）**
+
+#### 框架与技术基线
+
+- RuoYi 3.9.2 派生工程；Spring Boot 4.0.6，Java 17 编译目标，本地使用 JDK 26；运营端为 Vue 3，消费者端为 uni-app 3 + Android 原生 WebView 容器。
+- AI 网关为 FastAPI + LangGraph + Pydantic；本机复用 YOLO Conda Python 3.14.4，云端镜像为 `python:3.14.6-slim`。
+- Qwen3.5 Omni 继续负责实时 ASR、对话和 TTS；`qwen3.8-max` 负责家庭 Agent 规划与 Function Calling；MySQL 8 保存业务数据，Redis 7 保存短时家庭状态。
+- 家电执行仍由 Android `GenieBridge` 调用 T10S 天猫精灵内部 `GenieApi / method=15`，不依赖 Home Assistant。
+
+#### 功能点
+
+- 放松、疲劳和压力等场景不再写死音乐或空调；Agent 根据家庭状态、天气、设备状态和上一方案，在当前合理的空调、风扇、音乐播放器中做有界智能选择。
+- 所有家电建议先询问是否执行。待确认阶段支持自然同意、拒绝、追加动作、修改或更换方案、提出新请求、重新呼喊“管家”以及结束对话。
+- 支持“执行，顺带放一首舒缓的音乐”等多动作追加；追加内容必须重新经过同一 Agent 的参数校验、风险白名单和二次确认状态机。
+- 执行、拒绝或结束后统一回到等待“管家”；Provider 接受只表述“已提交”，不伪报实体家电已经动作。
+- 团队本地数据库统一为 `127.0.0.1:3306/ry-cat / root / 123456`；公开 `.env` 已脱敏，生产密钥与模型 Key 仍由私有环境变量注入。
+
+#### 验收与产物
+
+- FastAPI：Python 3.14 环境下 `110 passed`；Docker Compose 配置、Python 3.14.6 Linux 镜像和云端健康检查均通过。
+- APK：`ruoyi-app/apk/天猫智家语音助手-v1.1.2.apk`，`versionCode=112`，1,621,555 字节，SHA-256 `9CE3F9F3993F43FD41E998BD165688BD6ACE7A19E08EBABD926FF33090F8E8BE`，v1/v2 签名有效。
+- T10S：`192.168.3.234:5555` 已覆盖安装并核验 `versionName=1.1.2`、`versionCode=112`。
+- 云端：`java-api`、`ai-gateway`、`web-gateway` 均为 v1.1.2；AI 网关实际运行 Python 3.14.6，数据库、记忆、文字对话和 Agent 全部 ready。
+- 回滚：云端只保留 `backups/rollback-v1.1.1-20260817-101501.tar.gz`，包内 `APP_VERSION=1.1.1` 已核验。
+
+### v1.1.1
+
+更新时间：**2026.08.14 20:04:17（UTC+8）**
+
+#### 框架与技术基线
+
+- 延续 RuoYi 3.9.2、Spring Boot、Vue 3、uni-app、FastAPI、MySQL、Redis 和 Docker Compose 全栈结构。
+- Qwen3.5 Omni 负责实时语音，`qwen3.8-max` 固定负责 LangGraph Agent 规划；短时家庭状态继续由 Redis 保存 300 秒。
+- 浏览器音频采用 Web Audio + AudioWorklet，16 kHz/16-bit 单声道采集；T10S WebView 不兼容时才回退 ScriptProcessor。
+- 用户确认后的低风险文字指令由 `GenieBridge → ContentResolver.insert() → GenieApi / method=15` 提交，并通过同一 `execution_id` 回传结果。
+
+#### 功能点
+
+- 情境范围扩展到冷热、明暗、潮湿干燥、闷、空气质量、疲劳、压力、困倦、睡眠、口渴、饥饿、头痛和噪声；健康风险仍只提示求助，不映射为家电操作。
+- 疲劳和放松在本版形成固定的低风险舒缓音乐候选，必须二次确认；v1.1.2 才进一步升级为音乐、风扇和空调之间的有界智能选择。
+- 增加 Provider 拒绝、异常和 8 秒超时回执；`accepted_unverified` 仅播报“已提交给天猫精灵”。
+- 增加播报期转写拦截、播报结束相似回灌过滤、采集质量诊断以及可配置 VAD 参数。
+- 对话退出后丢弃晚到 Agent 结果，拒绝重复、过期或 execution ID 不匹配的回执。
+
+#### 验收与产物
+
+- FastAPI `96 passed`；H5/App 生产构建成功，AudioWorklet 同时进入 APK 和云端 H5。
+- APK：`天猫智家语音助手-v1.1.1.apk`，`versionCode=111`，1,621,553 字节，SHA-256 `988B84AF6740FF0FD60907AC9B946412B6AD409E20EF6E3D6F4341A82650F458`。
+- T10S 已完成覆盖安装；阿里云三项业务镜像曾统一为 v1.1.1，公网健康检查通过。
+- 本版没有修改 MySQL 表，也没有执行数据库迁移。
+
+### v1.1.0
+
+更新时间：**2026.08.14 18:22:47（UTC+8）**
+
+#### 框架与技术基线
+
+- 在既有 FastAPI 实时语音链路中首次加入 `assistant_server/agent/`，使用 LangGraph `StateGraph`、Qwen Function Calling 和 Pydantic 结构化计划。
+- uni-app 通过可信 WebView 的 `GenieBridge` 连接 Android 原生层；Android 使用 `ContentResolver.insert()` 调用 T10S 导出的 `GenieApi`。
+- 普通对话继续直连 Qwen3.5 Omni，只有家居操作意图进入单总控 Agent；Redis 用于跨 Worker 的短时家庭状态。
+
+#### 功能点
+
+- 首次形成“状态/天气取证 → Agent 规划 → 建议 → 用户明确确认 → T10S 提交”的低风险控制闭环。
+- 覆盖灯光、空调、新风、窗帘、电视、投影、风扇、空气净化、加湿除湿、扫地机器人和智能插座；门锁、燃气、加热和安防类请求明确拦截。
+- 建立严格“管家”唤醒、休眠期间环境语音丢弃、明确退下语义和播报期间麦克风上行暂停。
+- 增加 300 秒家庭状态层、天气工具、模拟照度标记、长期偏好注入以及可审计的决策依据摘要。
+- T10S 开机改为透明引导 Activity + 前台悬浮窗服务，返回天猫精灵主页后助手仍可持续待命。
+
+#### 验收与产物
+
+- FastAPI `78 passed`；uni-app H5/App、Android Release 和 Docker Compose 校验通过。
+- APK：`天猫智家语音助手-v1.1.0.apk`，`versionCode=110`，SHA-256 `661325B361B7E977F8F040A1B3B55CA056CE71189CB23E761FD17BD891CE576F`。
+- 2026.08.14 已完成 T10S 覆盖安装与阿里云 FastAPI 更新，Java/FastAPI 容器保持健康。
+
+### v1.0.0
+
+更新时间：**2026.08.11（UTC+8）**
+
+#### 框架与技术基线
+
+- RuoYi 3.9.2 派生工程：Spring Boot 4.0.6 + Spring Security + MyBatis + Druid，运营端为 Vue 3 + Vite + Element Plus。
+- 消费者端为 uni-app 3 + Vue 3，Android 使用原生 WebView 容器；AI 网关为 FastAPI + Uvicorn + WebSocket。
+- 模型主链为 Qwen3.5 Omni 实时语音，文字页提供 Qwen/DeepSeek 多模型；数据层为 MySQL 8 + Redis，部署层为 Docker Compose + Caddy。
+
+#### 功能点
+
+- 建立“天猫智家”品牌、注册登录、30 天本机身份、用户协议与隐私政策。
+- 完成实时语音、服务端 VAD、语音打断、双向转写和 PCM 播报，以及文字对话入口。
+- 支持本机对话记录、按账号隔离的跨会话长期记忆及运营后台的会话/记忆查询。
+- 建立 T10S 本机低风险 ContentProvider 控制原型；声学转发仅作为默认关闭的兼容回退。
+- 完成 FastAPI 限流、异步数据库写入、健康检查、Docker 云端部署与 T10S 真机基础验收。
+
+#### 验收与产物
+
+- 首个可交接的全栈工程基线，包含消费者端、运营端、Java 服务、FastAPI、SQL 和 Docker 部署代码。
+- 正式 APK：`天猫智家语音助手-v1.0.0.apk`，包名 `com.jpx.tmallsmarthome`。
+- 已在 Android 10、1280×800、arm64-v8a 的 T10S 上完成安装、登录、麦克风、实时 WebSocket 和语音回复验收。
+- 本版不包含 LangGraph Agent、Home Assistant、真实传感器闭环、复杂自动化以及门锁/燃气/安防等高风险控制。
+
+<details>
+<summary><strong>历史原始验收记录（点击展开）</strong></summary>
+
+### 原始记录：v1.1.2 发布说明与验收
 
 发布日期：**2026.08.17（UTC+8）**
 
@@ -75,13 +193,13 @@ uni-app 3 消费者端 ───┘               │
 
 ---
 
-## 1. v1.1.0 更新说明
+### 原始记录：v1.1.0 更新说明
 
 版本更新时间：**2026 年 8 月 14 日 18:22:47（UTC+8）**
 
 v1.1.0 在不改变实时语音、文字对话、账号、长期记忆和运营后台既有功能的前提下，完成 T10S 本机天猫精灵 `ContentProvider` 控制链路重构，并在 FastAPI 内落地智能家居 Agent 基线。
 
-### 1.1 v1.1.0 功能变更
+#### v1.1.0 功能变更
 
 - FastAPI 从 Omni 最终语音转写中识别明确、低风险的通用家居控制请求，并向具备原生能力的客户端发送结构化事件。当前覆盖灯光/照明、空调/新风、窗帘/纱帘/百叶帘、电视/投影、风扇、空气净化、加湿除湿、扫地机器人和智能插座，房间名、设备名、温度、亮度、风速、档位和模式会原样交给天猫精灵解析。
 - uni-app 通过可信本地 WebView 的 `GenieBridge` 把结构化命令交给 Android 原生层；H5 浏览器不会声明或调用该设备能力。
@@ -109,7 +227,7 @@ v1.1.0 在不改变实时语音、文字对话、账号、长期记忆和运营�
 - T10S 开机后不再自动打开完整助手页面。`BOOT_COMPLETED` 先拉起 1×1 透明引导 Activity，再启动前台悬浮窗服务并立即返回天猫精灵桌面；悬浮球使用项目老鼠品牌图标，用户首次点击后进入正式 APP。
 - 原生容器在助手首次启动后维持 WebView、麦克风与 WebSocket 运行；返回天猫精灵主页或切到后台时仍可监听“管家”。语音主页底部操作栏已移除，右上角退出按钮只回到天猫精灵主页，不结束助手常驻运行。
 
-### 1.2 v1.1.0 验证与产物
+#### v1.1.0 验证与产物
 
 - FastAPI 自动化测试通过：78 项（包含严格硬唤醒匹配、休眠语句忽略、明确退下语义、待确认执行/取消/含糊答复、隐式冷热诉求、家庭状态合并/清理、多类家居自然表达、高风险拦截、天气温度推荐、模拟照度推荐和用户明确参数优先）。
 - uni-app H5 与 App 生产构建通过。
@@ -119,7 +237,7 @@ v1.1.0 在不改变实时语音、文字对话、账号、长期记忆和运营�
 - APK SHA-256：`661325B361B7E977F8F040A1B3B55CA056CE71189CB23E761FD17BD891CE576F`。
 - 2026 年 8 月 14 日 18:22:47（UTC+8）已完成 v1.1.0 正式包重建、v1/v2 签名校验和 T10S 覆盖安装；当前正式包进程可正常拉起且未发现崩溃。阿里云 FastAPI 实时语音服务已同步更新，FastAPI 与 Java 容器均保持健康。
 
-### 1.3 v1.1.1 发布说明与验收
+### 原始记录：v1.1.1 发布说明与验收
 
 发布日期：**2026 年 8 月 14 日 20:04:17（UTC+8）**
 
@@ -156,7 +274,7 @@ flowchart LR
 
 本轮没有擅自发送开关现场家电的测试指令，因此验证的是完整的软件门控、天猫内部 Provider 可用性和提交回执链路，不宣称某一台实体家电已在本次发布操作中动作。当前正式控制方式本身就是天猫精灵内部文字指令，不需要 Home Assistant；未来若接入传感器、硬件网关或 Home Assistant，只作为可选的实时状态/物理结果来源。
 
-### 1.4 v1.0.0 历史基线
+### 原始记录：v1.0.0 历史基线
 
 发布日期：**2026 年 8 月 11 日**
 
@@ -201,6 +319,8 @@ flowchart LR
 以上内容是 v1.0.0 的历史范围说明。v1.1.0 已落地 LangGraph Agent 基线与 T10S Provider 指令闭环；Home Assistant、真实传感器和生产发布仍属于后续版本范围。
 
 > 2026 年 8 月 13 日补充：已在 T10S 上用普通第三方 APK 身份验证 `com.alibaba.ailabs.genie.assistant.provider/GenieApi` 可由 `ContentResolver.insert()` 直接提交文字指令，不要求 root、运行时 ADB、终端或无障碍权限。ADB 的 `content insert` 只用于开发期验证同一个 Android API。当前主应用源码、FastAPI 测试、H5 构建和 Android Debug 构建已通过；由于目标 T10S 暂不在现场，集成后的主应用仍需补一次真机端到端验收。Provider 接受指令不等于设备必然执行成功，因此 UI 和模型只能表述“已提交/正在处理”。
+
+</details>
 
 ---
 
@@ -1278,18 +1398,21 @@ npm run build:prod
 
 ## 18. 后续路线
 
-### v1.1.x：移动端与部署完善
+当前稳定基线为 `v1.1.2`。多场景 Agent 建议、自由补充执行、天猫精灵内部 `GenieApi` 控制、T10S 覆盖安装、云端 Python 3.14.6 部署及 v1.1.1 单一回滚包均已完成，不再列为后续事项。
 
-- 完善 Android 前后台生命周期、系统返回键和网络状态提示。
-- 将临时公网 IP/明文 WS 迁移到正式域名、HTTPS/WSS 和证书自动续期。
-- 正式域名、Caddy 自动 HTTPS/WSS、日志轮转和监控告警。
-- 记忆命中率、提取延迟和用户纠错机制优化。
+### v1.1.x：稳定性与交付完善
+
+- 完善 Android 前后台生命周期、系统返回键、断网提示与重连终止状态。
+- 将临时公网 IP/明文 WS 迁移到正式域名、HTTPS/WSS，并补齐 Caddy 自动续证、日志轮转和监控告警。
+- 持续回归 T10S 的 `ContentProvider` 调用、执行回执和等待唤醒状态，防止系统升级后出现兼容性退化。
+- 增加长期记忆编辑、纠错和过期管理，继续优化记忆命中率与提取延迟。
 
 ### v1.2.x：Agent 与智能家居深化
 
-- 保持天猫精灵内部 `GenieApi` 为家电控制通道；按实际硬件条件选配传感器、网关或 Home Assistant 状态适配器。
-- 可选状态源持续推送真实室内照度、温湿度、人体存在和设备状态，替换未接硬件环境下的模拟兜底值；不得因此把当前控制链路改写成依赖 Home Assistant。
-- 增加设备状态查询、执行结果闭环、幂等键、分级确认和复杂自动化场景。
+- 保持天猫精灵内部 `GenieApi` 为家电控制通道；按实际硬件条件选配传感器、网关或 Home Assistant 状态适配器，Home Assistant 不作为当前控制链路的前置依赖。
+- 接入真实室内照度、温湿度、人体存在和设备状态，逐步替换未接硬件环境下的模拟兜底值。
+- 增加设备状态查询、物理执行结果闭环、幂等键、分级确认和多设备自动化场景。
+- 扩展 Agent 的组合建议与自然语言修订能力，但高风险操作继续执行二次确认与安全拒绝。
 - 评估将 Dify 用于知识库与非实时运营流程，但保持实时语音控制主链路独立。
 
 ### 长期方向
@@ -1359,196 +1482,6 @@ npm run build:prod
 
 ---
 
-## 21. 后端与 SQL 代码检查记录（2026-08-11）
+**当前文档基线：天猫智家 v1.1.2 · 2026 年 8 月 17 日（UTC+8）**
 
-> 对 Java 后端（ruoyi-admin / ruoyi-framework / ruoyi-system）与 `sql/` 的 medium 只读检查结论。仅作审查记录，未改动任何业务代码。修复前请再次评估影响。
-
-### 21.1 严重
-
-1. **JWT 令牌密钥为 RuoYi 公开默认值** —— `ruoyi-admin/src/main/resources/application.yml:100` `token.secret: abcdefghijklmnopqrstuvwxyz`，可被离线伪造 admin 身份令牌；`application.yml:102` `expireTime: 43200`（30 天滑动续期）放大风险。
-2. **Druid 监控台匿名开放 + 弱口令** —— `ruoyi-framework/.../config/SecurityConfig.java:106` 将 `/druid/**` 设为 permitAll；`application-druid.yml:44-51` 的 `allow` 白名单为空，且控制台仍使用仓库默认弱口令（具体值不在文档中传播）。
-3. **默认管理员口令仍是 admin123** —— `sql/ry-cat.sql:611-613` admin / operator 的 BCrypt 值均为 RuoYi 默认口令 `admin123` 的公开哈希。
-4. **Druid wall 允许多语句执行** —— `application-druid.yml:59-61` `multi-statement-allow: true`，会放大任意潜在注入点的危害。
-
-### 21.2 中等
-
-5. **数据库与初始口令明文** —— `application-druid.yml:11` MySQL root `123456`；`sql/ry-cat.sql:107` `sys.user.initPassword=123456`。
-6. **普通角色权限过大** —— `sql/ry-cat.sql:507-578` role_id=2（分配给 operator）绑定了 `1000-1048` 全套用户/角色/菜单/部门/字典/参数增删改导出权限，与 `sql/tmall-smart-home-assistant-upgrade.sql:40-42` 注释「仅查看语音会话与长期记忆」严重不符。
-7. **演示遗留 TestController** —— `ruoyi-admin/.../controller/tool/TestController.java`（第 34-35 行硬编码 admin123），且 `application.yml:127-131` springdoc 分组仅扫描该演示包。属应删除的垃圾代码。
-8. **Swagger 生产默认开启且匿名可访问** —— `application.yml:123-125` + `SecurityConfig.java:106`（`/swagger-ui/**`、`/v3/api-docs/**` permitAll）。
-9. **CORS 允许任意来源** —— `ruoyi-framework/.../config/ResourcesConfig.java:57-70` `addAllowedOriginPattern("*")` + 全 header + 全 method。
-
-### 21.3 轻微
-
-10. `application.yml:37` 生产日志级别 `com.ruoyi: debug`，会打印 SQL 与参数。
-11. `application.yml:67-70` devtools 热部署 `enabled: true`，且 `ruoyi-admin/pom.xml:21-25` 仍引入 spring-boot-devtools。
-12. `sql/tmall-smart-home-assistant-upgrade.sql:34-38` 菜单 `ON DUPLICATE KEY UPDATE` 子句漏更新 `route_name` 列。
-
-### 21.4 已确认正常（重点核对项）
-
-- **三张 ai 表字段与 Python 端 INSERT/UPDATE 完全匹配**（`sql/ry-cat.sql:14-77`）：`ai_voice_session` 含 `user_agent`，`ai_voice_message` 有 `(session_id,sequence_no)` 唯一键，`ai_user_memory` 的 `uk_ai_user_memory_key(user_id,memory_key)` 唯一索引可支撑 `history.py` / `memory.py` 的 `ON DUPLICATE KEY UPDATE`；无字段缺失、无类型不匹配。
-- **四个 `/assistant` 接口均真实存在且带 `@PreAuthorize`**：`ruoyi-admin/.../controller/assistant/AiAssistantController.java:30-61`（overview / session:list / memory:list / memory:remove）。
-- `AiAssistantMapper.xml` 全部使用 `#{}` 参数绑定、无 `${}` 拼接注入、无 N+1（`LEFT JOIN sys_user` 一次查完）、分页走 PageHelper、无空实现。
-- `pom.xml:153-158` 已移除 generator / quartz 模块，`sql/ry-cat.sql` 无 `gen_*` / `qrtz_*` 残留，语音助手菜单与权限标识齐全。
-- `pom.xml:19,31` 的 `spring-boot 4.0.6` / `springdoc 3.0.3` 已通过 Maven 与 Docker 多阶段构建验证，可正常解析并完成构建；后续升级仍需配套回归测试。
-
----
-
-## 22. v1.1.1 发布验收与后续优化记录
-
-本节原始清单来自 v1.0.0 完成后的一次完整代码审查。v1.1.0 增加了本机 ContentProvider 控制基线；v1.1.1 又完成 Qwen3.8-Max Agent 情境矩阵、二次确认后的真实 Provider 提交回执、T10S 正式包和云端部署。未关闭的生产安全加固与体验项不影响内部测试 APK；正式公开发布前仍须完成生产域名/HTTPS、密钥轮换、法务复核，并在现场人员确认后对指定低风险家电补做真实动作验收。
-
-优先级说明：
-
-| 类别 | 含义 | 是否阻断打包 |
-| --- | --- | --- |
-| A 类 | APK 运行阻断，打出来也跑不通 | 是 |
-| B 类 | 安全漏洞，公网发布前必须修复 | 是 |
-| C 类 | 功能性缺陷，影响体验或稳定性 | 否 |
-| D 类 | 遗留清理与生产配置收紧 | 否 |
-| E 类 | 功能增强建议，可排入后续版本 | 否 |
-
-修复每一条后，请勾选对应复选框，并同步更新本文档中受影响的章节（接口表、配置表、版本号、验收清单）。
-
-### 22.1 A 类：APK 打包阻断
-
-- [x] **A-01 服务地址仍指向本机回环地址（v1.0.0 已处理）**
-  - 位置：`ruoyi-app/config.js:4`（`baseUrl`）、`ruoyi-app/config.js:7`（`assistant.baseUrl`）
-  - 现象：两个地址都是 `http://127.0.0.1`。打进 APK 后 `127.0.0.1` 指的是手机自身，登录和语音链路全部无法连接。
-  - 建议：替换为生产 HTTPS/WSS 域名。若过渡期确实需要走明文 HTTP/WS 联调，需在 `ruoyi-app/manifest.json` 的 `app-plus.distribute.android` 中增加 `"usesCleartextTraffic": true`，因为 Android 9 及以上默认禁止明文流量。
-
-- [x] **A-02 WebSocket 的 Origin 校验会拒绝 APK 客户端（v1.0.0 已处理并经 T10S 验证）**
-  - 位置：`ruoyi-fastapi/main.py:203-206`（`/ws/v1/assistant`）、`ruoyi-fastapi/main.py:234-237`（`/ws/v1/text-chat`）
-  - 现象：文字对话在 App 端走 `uni.connectSocket`，那是原生 socket，**不会发送 `Origin` 请求头**；语音走 renderjs 中的 `new WebSocket`，在 WebView 里 `Origin` 是 `file://` 或空字符串。当前 `ALLOWED_ORIGINS=*` 掩盖了该问题，一旦生产按第 14.2 节建议改成域名白名单，APK 会立即收到 4403 而无法建连。
-  - 建议：把"来源校验"和"身份校验"解耦。Origin 白名单只用于浏览器 H5；对空 Origin 或 `file://` 的原生客户端放行，仍然依赖 `client.hello` 中的 RuoYi Token 完成鉴权。可增加 `ALLOW_NATIVE_CLIENTS` 开关明确该行为。
-
-- [x] **A-03 缺少 Android 运行时麦克风权限申请（v1.0.0 已处理）**
-  - 位置：`ruoyi-app/manifest.json:28`（仅静态声明 `RECORD_AUDIO`）；全项目搜索不到 `plus.android.requestPermissions`
-  - 现象：Android 6 及以上必须动态申请危险权限。当前代码从未申请，WebView 中的 `getUserMedia()` 会直接失败，用户只能看到 `index-voice-bridge.js:148` 抛出的"麦克风不可用"这一句模糊提示。
-  - 建议：在 `pages/index.vue` 的 `startSession()` 之前，用条件编译 `#ifdef APP-PLUS` 调用 `plus.android.requestPermissions(['android.permission.RECORD_AUDIO'])`，并对用户拒绝、"不再询问"两种结果分别给出可操作的引导（后者需引导至系统设置页）。
-
-- [ ] **A-04 文字对话页的语音能力在 APK 中必然失效，且会反复弹出错误提示**
-  - 位置：`ruoyi-app/pages/text-chat.vue:262-268`（`SpeechRecognition`）、`329-332`（`speechSynthesis`）、`505`（`text.done` 后自动播报）
-  - 现象：语音识别和语音播报使用的是浏览器 Web Speech API。uni-app 的 App 逻辑层没有 `window` 对象，Android System WebView 也不实现这两个接口。后果是麦克风按钮永远提示"当前浏览器不支持语音输入"；更严重的是 `handleTextEvent` 在收到 `text.done` 后会无条件调用 `speakText()`，**模型每回答完一句就弹出一次"当前浏览器不支持语音播报"**。
-  - 建议：二选一。最小改动是用条件编译在 App 平台隐藏麦克风与播报按钮，并去掉自动播报；完整方案是 App 端改用原生能力——识别走 `uni.getRecorderManager()` 上传服务端 ASR，播报走 `plus.speech` 或原生 TTS。无论选哪种，都必须消除"每次回答后弹窗"这一行为。
-
-- [x] **A-05 缺少 Android 隐私政策弹窗与应用图标配置（v1.0.0 已处理）**
-  - 位置：`ruoyi-app/` 下不存在 `androidPrivacy.json`；`ruoyi-app/manifest.json` 的 `app-plus.distribute` 中没有 `icons` 字段，也没有自定义启动图
-  - 现象：中国大陆应用市场强制要求应用首次启动时弹出隐私政策并由用户确认；缺少图标配置会导致 APK 使用 HBuilderX 默认图标。
-  - 建议：新增 `androidPrivacy.json`，其中的政策链接指向应用内的 `/pages/common/agreement/index`；在 `manifest.json` 中补齐各分辨率 `icons` 与启动图；同时确认 `minSdkVersion`、`targetSdkVersion` 与 `abiFilters`。
-
-- [x] **A-06 H5 模板是 webpack 时代的残留文件（v1.0.0 已处理并通过 Vite 构建）**
-  - 位置：`ruoyi-app/manifest.json:63`（`h5.template` 指向 `static/index.html`）、`ruoyi-app/static/index.html`
-  - 现象：该模板使用 `<%= htmlWebpackPlugin.options.title %>` 和 `<%= VUE_APP_INDEX_CSS_HASH %>` 这类 Vue CLI 占位符，并且缺少 `</body>` 闭合标签与入口 `<script>`。本项目是 Vue 3 + Vite（`vueVersion: 3`），构建 H5 时应使用根目录的 `index.html`。
-  - 建议：移除 `manifest.json` 中的 `h5.template` 配置并删除 `static/index.html`，或将其改写为 Vite 兼容的模板。改完后跑一次 H5 构建确认标题和样式正常。
-
-### 22.2 B 类：安全
-
-- [ ] **B-01 JWT 密钥仍是 RuoYi 公开默认值（最高危）**
-  - 位置：`ruoyi-admin/src/main/resources/application.yml:100`
-  - 现象：`token.secret` 为 `abcdefghijklmnopqrstuvwxyz`，这是 RuoYi 开源仓库中的默认值。任何人都能据此伪造合法 JWT 绕过登录；由于 FastAPI 网关完全信任 `/getInfo` 的返回结果（`ruoyi-fastapi/assistant_server/auth.py:44-59`），伪造的 Token 可以直接消耗百炼额度，并读取、删除任意账号的长期记忆。
-  - 建议：改为足够长的随机值，并通过环境变量或密钥管理服务注入，禁止写死在配置文件中。密钥轮换后所有已签发 Token 失效，需在发布说明中提示用户重新登录。
-
-- [ ] **B-02 Druid 监控台对外开放且使用弱口令**
-  - 位置：`ruoyi-admin/src/main/resources/application-druid.yml:44-51`
-  - 现象：`statViewServlet.enabled: true`、`allow` 为空（等同不限制来源 IP），且控制台仍使用仓库默认弱口令（具体值不在文档中传播）。公网暴露会泄露 SQL 语句、表结构与数据源配置。
-  - 建议：生产环境关闭 `statViewServlet`，或限制 `allow` 为内网网段并改用强口令。同时评估关闭 `filter.wall.config.multi-statement-allow`（第 61 行），它允许多语句执行，会放大注入影响面。
-
-- [ ] **B-03 数据库口令硬编码进仓库**
-  - 位置：`ruoyi-admin/src/main/resources/application-druid.yml:11`、`ruoyi-fastapi/.env.example:34`
-  - 现象：MySQL `root` 账号的明文弱口令直接写在配置文件中并随仓库分发（具体值不在文档中传播）。
-  - 建议：改为占位符 + 环境变量注入；生产使用最小权限的专用数据库账号，而不是 `root`。（`ruoyi-fastapi/.env` 已确认未被 Git 跟踪，这点是正确的。）
-
-- [ ] **B-04 指标接口无鉴权**
-  - 位置：`ruoyi-fastapi/main.py:157-159`
-  - 现象：`GET /metrics` 无需任何凭据即可访问，会泄露会话总量、容量拒绝次数、上游错误数等运营数据。
-  - 建议：增加独立的采集令牌或限制为内网访问；同时评估 `/health/ready`（`main.py:119-154`）返回的内部状态是否需要一并收敛。
-
-### 22.3 C 类：功能性缺陷
-
-- [ ] **C-01 上游会话轮换会硬切麦克风**
-  - 位置：`ruoyi-fastapi/assistant_server/realtime.py:339-348`；客户端对应 `ruoyi-app/pages/index-voice-bridge.js:78-89、201-207`
-  - 现象：轮换时服务端发送 `assistant.session.rotating` 后立即结束连接，客户端 `onclose` 触发 `stopCapture()`，重连拿到 `assistant.session.ready` 后才重新 `getUserMedia()`。默认 `UPSTREAM_ROTATE_SECONDS=6900`，即每 115 分钟用户会听到一次明显中断，且该窗口内的语音全部丢失。
-  - 建议：轮换期间保持本地采集不停止，仅暂存音频；或在服务端先建立新的上游连接再切换，实现对用户无感的续接。
-
-- [ ] **C-02 最近对话缓存只增不减，存在慢性内存泄漏**
-  - 位置：`ruoyi-fastapi/assistant_server/memory.py:67`（`_recent` 定义）、`212-231`（`_merge_recent`）
-  - 现象：每个用户在 `_recent` 中常驻最多 24 条、单条最长 4000 字符的消息，过期判断只发生在该用户下一次调用 `get_context()` 时。不活跃用户的条目永远不会被回收，没有任何定期清扫机制。用户量大且进程长期运行时内存会持续增长。
-  - 建议：增加后台定期清扫任务，或改用带容量上限的 LRU 结构。
-
-- [ ] **C-03 关闭记忆开关后删除接口返回 500**
-  - 位置：`ruoyi-fastapi/assistant_server/memory.py:144-162`（`delete_memory`、`clear_memories`），入口在 `ruoyi-fastapi/main.py:178-191`
-  - 现象：这两个方法没有像 `list_memories` 那样先判断 `self.ready`，而是直接调用 `database.execute_now()`。当 `MEMORY_ENABLED=false` 时会抛出 `RuntimeError("数据库服务尚未就绪")`，客户端收到 500 而不是明确的功能未启用提示。
-  - 建议：与 `list_memories` 保持一致，先判断 `self.ready`，未启用时返回明确的业务错误。
-
-- [ ] **C-04 客户端断开被误判为上游初始化失败**
-  - 位置：`ruoyi-fastapi/assistant_server/realtime.py:365-379`
-  - 现象：`ClientWriter.run()`（`realtime.py:198-205`）在客户端已断开时调用 `send_text()` 抛出的是 `RuntimeError`，而该异常被归入"上游初始化失败"分支，导致日志、`ai_voice_session.close_reason` 与推送给客户端的错误码全部记录错误原因。
-  - 建议：在 `ClientWriter` 内部捕获发送异常并转换为 `SlowClientError` 或独立的客户端断开异常，使其走 `realtime.py:380-383` 的正常关闭分支。
-
-- [ ] **C-05 登录成功后获取用户信息失败会卡死在登录页**
-  - 位置：`ruoyi-app/pages/login.vue:121-126`
-  - 现象：`loginSuccess()` 中 `useUserStore().getInfo().then(...)` 没有 `.catch` 分支。此时 loading 已经关闭、Token 已写入本地，若 `/getInfo` 失败则页面没有任何反馈，用户点击登录后看起来毫无反应。
-  - 建议：补充 `.catch`，给出明确提示；并考虑在 Token 已写入的情况下允许直接进入助手页，由 `App.vue` 的滑动续期逻辑后续补齐用户信息。
-
-- [ ] **C-06 注册入口写死为始终显示**
-  - 位置：`ruoyi-app/pages/login.vue:58`
-  - 现象：`const register = ref(true)` 是硬编码值，没有读取服务端的 `sys.account.registerUser` 配置。当服务端关闭注册时，用户仍能看到"立即注册"，点进去填完表单才会被拒绝。
-  - 建议：由服务端下发注册开关，前端据此控制入口显隐。
-
-### 22.4 D 类：清理与生产配置
-
-- [ ] **D-01 消费者端残留大量 RuoYi 模板代码**
-  - 位置：`ruoyi-app/pages/mine/`（7 个文件）、`ruoyi-app/pages/work/index.vue`、`ruoyi-app/pages/common/textview/`、`ruoyi-app/components/uni-section/`、`ruoyi-app/api/system/dict/`、`ruoyi-app/plugins/tab.js`、`ruoyi-app/plugins/auth.js`、`ruoyi-app/utils/dict.js`、`ruoyi-app/utils/permission.js`、`ruoyi-app/utils/upload.js`、`ruoyi-app/store/modules/dict.js`
-  - 现象：这些文件既未在 `pages.json` 中注册，也没有被任何在用页面引用，属于纯遗留代码，会干扰后续维护者判断功能边界。
-  - 建议：确认无引用后删除，并同步精简 `main.js` 中对 `useDict` 与 `plugins` 的注册。
-
-- [ ] **D-02 静态目录中约 350 KB 无用资源会原样打进 APK**
-  - 位置：`ruoyi-app/static/scss/colorui.css`（136 KB）、`ruoyi-app/static/images/banner/`（3 张，约 115 KB）、`ruoyi-app/static/images/profile.jpg`（81 KB）、`ruoyi-app/static/images/tabbar/`（6 张，约 24 KB）、`ruoyi-app/static/logo200.png`
-  - 现象：`static/` 目录在打包时整包拷贝，不参与 tree-shaking，未被引用的资源同样会进入安装包。
-  - 建议：删除确认无引用的资源。注意 `store/modules/user.js:9` 仍引用 `profile.jpg` 作为默认头像，删除前需一并处理。
-
-- [ ] **D-03 已移除模块的空目录仍然存在**
-  - 位置：`RuoYi/ruoyi-generator/`、`RuoYi/ruoyi-quartz/`
-  - 现象：`pom.xml` 的 `<modules>` 中已移除这两个模块，目录内也不再包含 Java 源码，但目录本身仍留在仓库里，容易让接手者误以为模块仍在使用。
-  - 建议：两个目录已不参与构建，确认不再需要保留目录占位后可直接删除；原临时归档目录已于 2026 年 8 月 12 日完成清理。
-
-- [ ] **D-04 生产配置未收紧**
-  - 位置：`ruoyi-admin/src/main/resources/application.yml`
-  - 现象：
-    - 第 10 行 `profile: D:/tmall-smart-home/uploadPath` 是 Windows 绝对路径，Linux 部署会直接失败；
-    - 第 37 行 `com.ruoyi: debug` 会打印 SQL 与参数；
-    - 第 67-70 行 `devtools.restart.enabled: true` 不应用于生产；
-    - 第 124 行 `swagger-ui.enabled: true`，且第 131 行 `packages-to-scan` 指向已删除的 `com.ruoyi.web.controller.tool` 包；
-    - 第 138 行 `referer.allowed-domains` 仍是 `ruoyi.vip`；
-    - 第 147 行 `xss.urlPatterns` 未覆盖 `/assistant/*`。
-  - 建议：拆分出生产 profile，逐项按环境覆盖。
-
-- [ ] **D-05 隐私政策缺少个人信息处理者主体信息**
-  - 位置：`ruoyi-app/pages/common/agreement/index.vue:35`
-  - 现象：联系方式一段只写了"请通过产品说明、应用安装渠道或服务合同中公布的运营方联系方式与我们联系"，没有列明公司全称与具体联系方式。国内应用市场审核通常要求隐私政策明确写出个人信息处理者名称和有效联系渠道。
-  - 建议：补充"无锡捷普迅智能科技有限公司"全称、办公地址与联系邮箱，并按第 16 节要求由法务复核数据保留期限、第三方模型服务说明与账号注销流程。
-
-### 22.5 E 类：功能增强建议
-
-以下为纯语音助手范围内的体验改进，不涉及 Agent 与家居控制，可按排期纳入 v1.1.x。
-
-- [ ] **E-01 真实输入电平指示**：`ruoyi-app/pages/index.vue:218-221` 的 `voice-bars` 目前只是 CSS 动画，与实际音量无关。可在 `index-voice-bridge.js` 的采集链路上接入 `AnalyserNode`，把真实电平回传给页面，让用户确认麦克风确实在工作。
-- [ ] **E-02 重连兜底终止态**：`ruoyi-app/pages/index-voice-bridge.js:94-107` 目前是无限指数退避，最长间隔 15 秒。用户在服务不可用时会永远看到"正在恢复连接"。建议连续失败达到阈值后进入明确的失败态，提示检查网络并提供手动重试入口。
-- [ ] **E-03 网络状态监听**：接入 `uni.onNetworkStatusChange`，断网时直接给出"网络已断开"，而不是让用户对着重连提示等待。
-- [ ] **E-04 长期记忆支持纠错**：`ruoyi-app/pages/index.vue` 的管家记忆页目前只能删除。若模型提取出不准确的事实，用户只能整条删掉。建议增加编辑能力，对应服务端补充更新接口。
-- [ ] **E-05 Android 返回键二次确认**：语音主页未处理系统返回键，用户误触会直接退出应用并中断通话。建议在 App 平台增加二次确认或最小化行为。
-
-### 22.6 处理约定
-
-1. 每完成一条，勾选对应复选框并在提交信息中标注编号（例如 `A-03`）。
-2. A 类与 B 类全部完成后，才能进入 HBuilderX 云打包流程。
-3. 涉及接口或配置变更的条目，必须同步更新第 12 节接口表与第 14 节配置表。
-4. 若某条目在实施中发现方案不成立，请在本节中记录结论与替代方案，不要静默跳过。
-5. 本清单中的已完成能力已纳入 v1.1.1；新增或遗留事项完成后，应按语义化版本规则继续升级并同步第 1 节与验收清单。
-
----
-
-**当前文档基线：天猫智家 v1.1.1 · 2026 年 8 月 14 日 20:04:17（UTC+8）**
-
-**当前构建状态：v1.1.1 语音与 Agent 联动版已完成 FastAPI 96 项测试、H5/App、Android Release 与 v1/v2 签名验证，Worklet 已进入 APK 和云端 H5；T10S 覆盖安装与阿里云部署均已完成。正式控制通道仍是天猫精灵内部 `GenieApi / method=15`。**
+**当前构建状态：v1.1.2 已完成 FastAPI 110 项测试、H5/App、Android Release、v1/v2 签名、T10S 覆盖安装与阿里云部署；云端 AI 网关运行 Python 3.14.6。正式控制通道仍是天猫精灵内部 `GenieApi / method=15`，所有 Agent 家电建议必须经用户确认。**
