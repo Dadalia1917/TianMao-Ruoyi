@@ -6,13 +6,14 @@ import json
 import logging
 import re
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any
 
 import httpx
 
-from .config import Settings
-from .history import VoiceHistoryStore
+from ..core.config import Settings
+from .contracts import MemoryRepository
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +52,7 @@ class _ExtractionJob:
 class MemoryManager:
     """Account-scoped long-term memory kept off the realtime audio hot path."""
 
-    def __init__(self, settings: Settings, database: VoiceHistoryStore) -> None:
+    def __init__(self, settings: Settings, database: MemoryRepository) -> None:
         self.settings = settings
         self.database = database
         self.enabled = settings.memory_enabled
@@ -183,17 +184,13 @@ class MemoryManager:
         # replacing them and losing a conversation during a fast reconnect.
         self._merge_recent(numeric_user_id, tuple(prepared[-12:]))
         try:
-            self._queue.put_nowait(
-                _ExtractionJob(numeric_user_id, session_id, tuple(prepared))
-            )
+            self._queue.put_nowait(_ExtractionJob(numeric_user_id, session_id, tuple(prepared)))
         except asyncio.QueueFull:
             self.dropped_jobs += 1
             if self.dropped_jobs == 1 or self.dropped_jobs % 100 == 0:
                 logger.error("memory extraction queue full; dropped_jobs=%s", self.dropped_jobs)
 
-    def remember_recent_message(
-        self, user_id: str | int, role: str, content: str
-    ) -> None:
+    def remember_recent_message(self, user_id: str | int, role: str, content: str) -> None:
         """Make a completed realtime transcript visible to the next session now."""
         if not self.ready or role not in {"user", "assistant"}:
             return
@@ -209,18 +206,12 @@ class MemoryManager:
             ({"role": role, "content": text[-4000:]},),
         )
 
-    def _merge_recent(
-        self, user_id: int, incoming: tuple[dict[str, str], ...]
-    ) -> None:
+    def _merge_recent(self, user_id: int, incoming: tuple[dict[str, str], ...]) -> None:
         if not incoming:
             return
         now = time.monotonic()
         current_entry = self._recent.get(user_id)
-        current = (
-            current_entry[1]
-            if current_entry is not None and current_entry[0] > now
-            else ()
-        )
+        current = current_entry[1] if current_entry is not None and current_entry[0] > now else ()
         max_overlap = min(len(current), len(incoming))
         overlap = 0
         for size in range(max_overlap, 0, -1):
@@ -230,9 +221,7 @@ class MemoryManager:
         merged = (current + incoming[overlap:])[-24:]
         self._recent[user_id] = (now + 15 * 60, merged)
 
-    async def _get_memories_cached(
-        self, user_id: int
-    ) -> tuple[dict[str, Any], ...]:
+    async def _get_memories_cached(self, user_id: int) -> tuple[dict[str, Any], ...]:
         now = time.monotonic()
         async with self._cache_lock:
             cached = self._cache.get(user_id)
@@ -284,9 +273,7 @@ class MemoryManager:
     async def _extract_and_save(self, job: _ExtractionJob) -> None:
         if self._client is None:
             return
-        transcript = "\n".join(
-            f"{item['role']}: {item['content']}" for item in job.messages
-        )
+        transcript = "\n".join(f"{item['role']}: {item['content']}" for item in job.messages)
         response = await self._client.post(
             self.settings.memory_api_url,
             headers={
@@ -377,9 +364,7 @@ class MemoryManager:
             )
         return result
 
-    def _prepare_messages(
-        self, messages: Iterable[dict[str, str]]
-    ) -> list[dict[str, str]]:
+    def _prepare_messages(self, messages: Iterable[dict[str, str]]) -> list[dict[str, str]]:
         remaining = self.settings.memory_extraction_max_chars
         selected: list[dict[str, str]] = []
         for item in reversed(list(messages)):

@@ -1,8 +1,8 @@
 import asyncio
 import json
 
-from assistant_server.config import Settings
-from assistant_server.memory import MemoryManager
+from assistant_server.core.config import Settings
+from assistant_server.services.memory import MemoryManager
 
 
 def test_parse_memories_sanitizes_model_output():

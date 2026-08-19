@@ -1,7 +1,7 @@
 import asyncio
 
-from assistant_server.config import Settings
-from assistant_server.history import VoiceHistoryStore
+from assistant_server.core.config import Settings
+from assistant_server.services.history import VoiceHistoryStore
 
 
 def test_disabled_history_is_a_noop(monkeypatch):
@@ -34,4 +34,3 @@ def test_disabled_history_is_a_noop(monkeypatch):
         assert store.dropped_events == 0
 
     asyncio.run(run())
-

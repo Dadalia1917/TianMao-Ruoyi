@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Iterable, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from .schemas import RiskLevel
-
 
 DEVICE_ALIASES: tuple[tuple[str, str], ...] = (
     ("音乐播放器", "音乐播放器"),
@@ -34,24 +34,96 @@ DEVICE_ALIASES: tuple[tuple[str, str], ...] = (
     ("插座", "智能插座"),
 )
 ROOMS = (
-    "主卧", "次卧", "儿童房", "老人房", "客厅", "卧室", "书房", "厨房",
-    "餐厅", "卫生间", "浴室", "阳台", "玄关", "全屋",
+    "主卧",
+    "次卧",
+    "儿童房",
+    "老人房",
+    "客厅",
+    "卧室",
+    "书房",
+    "厨房",
+    "餐厅",
+    "卫生间",
+    "浴室",
+    "阳台",
+    "玄关",
+    "全屋",
 )
 UNSAFE_MARKERS = (
-    "门锁", "开锁", "燃气", "燃气灶", "灶具", "电磁炉", "烤箱", "微波炉",
-    "热水器", "车库门", "监控", "摄像头", "撤防", "报警器", "电热毯", "取暖器",
+    "门锁",
+    "开锁",
+    "燃气",
+    "燃气灶",
+    "灶具",
+    "电磁炉",
+    "烤箱",
+    "微波炉",
+    "热水器",
+    "车库门",
+    "监控",
+    "摄像头",
+    "撤防",
+    "报警器",
+    "电热毯",
+    "取暖器",
 )
 NEGATIONS = ("不要", "别", "不用", "取消", "不需要")
 DISCUSSION_MARKERS = (
-    "怎么", "如何", "为什么", "方法", "教程", "原理", "区别", "开了吗", "关了吗",
-    "开着吗", "关着吗", "亮着吗", "有没有开", "有没有关", "设备状态",
-    "我刚才说", "比如", "例如", "能不能控制", "可不可以控制",
+    "怎么",
+    "如何",
+    "为什么",
+    "方法",
+    "教程",
+    "原理",
+    "区别",
+    "开了吗",
+    "关了吗",
+    "开着吗",
+    "关着吗",
+    "亮着吗",
+    "有没有开",
+    "有没有关",
+    "设备状态",
+    "我刚才说",
+    "比如",
+    "例如",
+    "能不能控制",
+    "可不可以控制",
 )
 ACTION_WORDS = (
-    "播放", "来一首", "放一首", "听",
-    "打开", "开启", "启动", "关闭", "关掉", "停止", "调到", "调成", "设为", "设置为",
-    "升高", "降低", "调高", "调低", "调亮", "调暗", "调大", "调小", "提高", "减小",
-    "切换", "拉开", "拉上", "合上", "清扫", "扫地", "回充", "开", "关",
+    "播放",
+    "来一首",
+    "放一首",
+    "听",
+    "打开",
+    "开启",
+    "启动",
+    "关闭",
+    "关掉",
+    "停止",
+    "调到",
+    "调成",
+    "设为",
+    "设置为",
+    "升高",
+    "降低",
+    "调高",
+    "调低",
+    "调亮",
+    "调暗",
+    "调大",
+    "调小",
+    "提高",
+    "减小",
+    "切换",
+    "拉开",
+    "拉上",
+    "合上",
+    "清扫",
+    "扫地",
+    "回充",
+    "开",
+    "关",
 )
 COMFORT_PATTERNS: tuple[tuple[str, tuple[str, ...], str], ...] = (
     (
@@ -68,14 +140,32 @@ COMFORT_PATTERNS: tuple[tuple[str, tuple[str, ...], str], ...] = (
     ("bright", ("太亮", "有点刺眼", "很刺眼", "光线刺眼", "灯太亮"), "灯"),
     ("humid", ("有点潮", "太潮", "好潮", "湿气重", "太湿了"), "除湿机"),
     ("dry", ("有点干", "太干", "好干", "空气干燥"), "加湿器"),
-    ("stuffy", ("有点闷", "好闷", "太闷", "空气有点闷", "屋里很闷", "房间很闷", "不通风", "想透透气"), "新风"),
+    (
+        "stuffy",
+        ("有点闷", "好闷", "太闷", "空气有点闷", "屋里很闷", "房间很闷", "不通风", "想透透气"),
+        "新风",
+    ),
     ("air_quality", ("空气不好", "空气有味道", "有异味", "灰尘很大", "空气不舒服"), "空气净化器"),
 )
 WELLBEING_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("fatigue", ("我累了", "有点累", "好累", "太累", "很疲惫", "有点疲惫", "精疲力尽")),
     ("sleepy", ("我困了", "有点困", "好困", "太困", "困死了", "想睡觉", "犯困")),
     ("sleep_problem", ("睡不着", "失眠了", "一直没睡着", "难以入睡")),
-    ("stress", ("压力很大", "压力好大", "有点焦虑", "很焦虑", "心里很烦", "好烦", "太烦了", "很烦躁", "想放松", "我想放松一下")),
+    (
+        "stress",
+        (
+            "压力很大",
+            "压力好大",
+            "有点焦虑",
+            "很焦虑",
+            "心里很烦",
+            "好烦",
+            "太烦了",
+            "很烦躁",
+            "想放松",
+            "我想放松一下",
+        ),
+    ),
     ("thirst", ("我渴了", "有点渴", "好渴", "口渴")),
     ("hunger", ("我饿了", "有点饿", "好饿", "肚子饿")),
     ("headache", ("有点头疼", "有点头痛", "头有点晕", "轻微头晕")),
@@ -84,12 +174,32 @@ WELLBEING_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
 RELAXATION_SCENARIOS = frozenset({"fatigue", "stress"})
 RELAXATION_DEVICES = ("空调", "风扇", "音乐播放器")
 HEALTH_ALERTS = (
-    "胸痛", "胸口剧痛", "呼吸困难", "喘不上气", "无法呼吸", "昏倒", "昏厥",
-    "意识不清", "严重过敏", "嘴唇发紫", "突然说不清话", "一侧无力",
+    "胸痛",
+    "胸口剧痛",
+    "呼吸困难",
+    "喘不上气",
+    "无法呼吸",
+    "昏倒",
+    "昏厥",
+    "意识不清",
+    "严重过敏",
+    "嘴唇发紫",
+    "突然说不清话",
+    "一侧无力",
 )
 NEGATED_FEELINGS = (
-    "不热", "不冷", "不累", "不困", "不渴", "不饿", "不焦虑", "不烦",
-    "没有压力", "没那么累", "没那么困", "没事",
+    "不热",
+    "不冷",
+    "不累",
+    "不困",
+    "不渴",
+    "不饿",
+    "不焦虑",
+    "不烦",
+    "没有压力",
+    "没那么累",
+    "没那么困",
+    "没事",
 )
 
 
@@ -171,9 +281,7 @@ class IntentHandlerRegistry:
             raise ValueError(f"intent handler already registered: {name}")
         items = [item for item in self._handlers if item.name != name]
         items.append(handler)
-        self._handlers = tuple(
-            sorted(items, key=lambda item: (-int(item.priority), item.name))
-        )
+        self._handlers = tuple(sorted(items, key=lambda item: (-int(item.priority), item.name)))
 
     def resolve(self, context: IntentContext) -> dict[str, Any]:
         for handler in self._handlers:
@@ -182,14 +290,11 @@ class IntentHandlerRegistry:
         raise RuntimeError("intent registry has no fallback handler")
 
     def accepts_as_entrypoint(self, context: IntentContext) -> bool:
-        return any(
-            handler.accepts_as_entrypoint(context) for handler in self._handlers
-        )
+        return any(handler.accepts_as_entrypoint(context) for handler in self._handlers)
 
     def catalog(self) -> list[dict[str, Any]]:
         return [
-            {"name": handler.name, "priority": int(handler.priority)}
-            for handler in self._handlers
+            {"name": handler.name, "priority": int(handler.priority)} for handler in self._handlers
         ]
 
 
@@ -268,9 +373,7 @@ class ComfortIntentHandler:
     def analyze(self, context: IntentContext) -> dict[str, Any]:
         comfort_intent = find_comfort_intent(context.text)
         device = next(
-            device
-            for name, _markers, device in COMFORT_PATTERNS
-            if name == comfort_intent
+            device for name, _markers, device in COMFORT_PATTERNS if name == comfort_intent
         )
         return {
             "route": "contextual",
@@ -319,9 +422,7 @@ class DeviceControlIntentHandler:
         text = context.text
         device = _device(text)
         room = _room(text)
-        if "开关" in text and not any(
-            word in text for word in ("打开", "开启", "关闭", "关掉")
-        ):
+        if "开关" in text and not any(word in text for word in ("打开", "开启", "关闭", "关掉")):
             return {"route": "clarify", "device": device, "room": room}
         if any(word in text for word in ("关闭", "关掉", "停止")):
             action = "close"

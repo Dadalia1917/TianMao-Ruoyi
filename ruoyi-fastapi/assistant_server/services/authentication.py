@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 import httpx
 
-from .config import Settings
+from ..core.config import Settings
 
 
 class AuthenticationError(Exception):
@@ -65,11 +65,9 @@ class RuoYiAuthenticator:
             )
             if len(self._cache) > 10_000:
                 self._cache = {
-                    key: value for key, value in self._cache.items()
-                    if value.expires_at > now
+                    key: value for key, value in self._cache.items() if value.expires_at > now
                 }
         return user_id
 
     async def close(self) -> None:
         await self._client.aclose()
-

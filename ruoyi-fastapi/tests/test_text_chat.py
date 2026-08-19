@@ -1,7 +1,7 @@
 import pytest
 
-from assistant_server.config import Settings
-from assistant_server.text_chat import TextChatError, TextChatService
+from assistant_server.core.config import Settings
+from assistant_server.services.text_chat import TextChatError, TextChatService
 
 
 def test_text_model_catalog_uses_stable_ui_names(monkeypatch):

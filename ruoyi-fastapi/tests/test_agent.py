@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -8,10 +8,10 @@ from assistant_server.agent import (
     HouseholdAgentService,
     HouseholdStateUpdate,
 )
-from assistant_server.agent.state import HouseholdStateStore
 from assistant_server.agent.handlers import IntentContext
 from assistant_server.agent.schemas import DecisionStatus, Evidence, RiskLevel
-from assistant_server.config import Settings
+from assistant_server.agent.state import HouseholdStateStore
+from assistant_server.core.config import Settings
 
 
 class FakeDataTools:
@@ -20,7 +20,7 @@ class FakeDataTools:
             kind="weather",
             summary="无锡当前35℃",
             source="test-weather",
-            observed_at=datetime.now(timezone.utc),
+            observed_at=datetime.now(UTC),
             reliability="high",
             data={"temperature_c": 35, "humidity_percent": 62},
         )
@@ -30,7 +30,7 @@ class FakeDataTools:
             kind="environment",
             summary="室内模拟照度20 lux",
             source="simulated-test-sensor",
-            observed_at=datetime.now(timezone.utc),
+            observed_at=datetime.now(UTC),
             reliability="low",
             simulated=True,
             data={"illuminance_lux": 20},
@@ -46,7 +46,7 @@ class FakeDataTools:
             kind="household_state",
             summary=f"{room}实测室温28℃，湿度68%，空调关闭，偏好{preferred}℃",
             source="test-home-assistant",
-            observed_at=datetime.now(timezone.utc),
+            observed_at=datetime.now(UTC),
             reliability="high",
             data={
                 "room": room,
@@ -196,9 +196,7 @@ def test_natural_short_heat_expression_is_recognized(monkeypatch):
 
 
 def test_stuffy_room_proposes_fresh_air_with_confirmation(monkeypatch):
-    decision = run_plan(
-        build_agent(monkeypatch), AgentRequest(transcript="屋里很闷", user_id="1")
-    )
+    decision = run_plan(build_agent(monkeypatch), AgentRequest(transcript="屋里很闷", user_id="1"))
 
     assert decision.status == DecisionStatus.EXECUTE
     assert decision.action is not None
@@ -208,9 +206,7 @@ def test_stuffy_room_proposes_fresh_air_with_confirmation(monkeypatch):
 
 
 def test_bright_room_recommends_lower_light_level(monkeypatch):
-    decision = run_plan(
-        build_agent(monkeypatch), AgentRequest(transcript="灯太亮了", user_id="1")
-    )
+    decision = run_plan(build_agent(monkeypatch), AgentRequest(transcript="灯太亮了", user_id="1"))
 
     assert decision.status == DecisionStatus.EXECUTE
     assert decision.action is not None
@@ -305,9 +301,7 @@ def test_relaxation_does_not_randomly_cool_an_already_cool_room(monkeypatch):
 
 def test_direct_relaxing_music_request_uses_provider_channel(monkeypatch):
     agent = build_agent(monkeypatch)
-    decision = run_plan(
-        agent, AgentRequest(transcript="播放一首舒缓的轻音乐", user_id="1")
-    )
+    decision = run_plan(agent, AgentRequest(transcript="播放一首舒缓的轻音乐", user_id="1"))
 
     assert agent.might_be_home_request("播放一首舒缓的轻音乐")
     assert decision.status == DecisionStatus.EXECUTE

@@ -10,7 +10,7 @@ from typing import Any
 import httpx
 from fastapi import WebSocket
 
-from .config import Settings
+from ..core.config import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -154,9 +154,7 @@ class TextChatService:
             raise TextChatError("unsupported_model", "不支持该文字模型")
 
         upstream_messages, transcript = self._sanitize_messages(request.get("messages"))
-        system_prompt = _SYSTEM_PROMPT_TEMPLATE.format(
-            identity_name=spec.identity_name
-        )
+        system_prompt = _SYSTEM_PROMPT_TEMPLATE.format(identity_name=spec.identity_name)
         if memory_context:
             system_prompt += (
                 "\n\n以下 <account_memory> 是服务端为当前登录账号保存的长期事实与最近对话。"
@@ -200,9 +198,7 @@ class TextChatService:
         last_flush = time.monotonic()
 
         try:
-            async with self._client.stream(
-                "POST", url, headers=headers, json=payload
-            ) as response:
+            async with self._client.stream("POST", url, headers=headers, json=payload) as response:
                 if response.status_code >= 400:
                     body = await response.aread()
                     raise self._upstream_error(response.status_code, body)
@@ -223,11 +219,7 @@ class TextChatService:
                     if not choices:
                         continue
                     delta = choices[0].get("delta") or {}
-                    reasoning = str(
-                        delta.get("reasoning_content")
-                        or delta.get("reasoning")
-                        or ""
-                    )
+                    reasoning = str(delta.get("reasoning_content") or delta.get("reasoning") or "")
                     content = str(delta.get("content") or "")
                     if reasoning:
                         pending_reasoning.append(reasoning)
@@ -235,9 +227,7 @@ class TextChatService:
                         pending_answer.append(content)
                         answer_parts.append(content)
 
-                    buffered = sum(map(len, pending_reasoning)) + sum(
-                        map(len, pending_answer)
-                    )
+                    buffered = sum(map(len, pending_reasoning)) + sum(map(len, pending_answer))
                     if buffered >= 256 or time.monotonic() - last_flush >= 0.04:
                         await self._flush(websocket, pending_reasoning, pending_answer)
                         last_flush = time.monotonic()
@@ -283,9 +273,7 @@ class TextChatService:
             )
             reasoning_parts.clear()
         if answer_parts:
-            await websocket.send_json(
-                {"type": "text.answer.delta", "delta": "".join(answer_parts)}
-            )
+            await websocket.send_json({"type": "text.answer.delta", "delta": "".join(answer_parts)})
             answer_parts.clear()
 
     def _sanitize_messages(
@@ -328,10 +316,7 @@ class TextChatService:
             payload = json.loads(body.decode("utf-8", errors="replace"))
             error = payload.get("error") or {}
             message = str(
-                error.get("message")
-                or payload.get("message")
-                or payload.get("code")
-                or message
+                error.get("message") or payload.get("message") or payload.get("code") or message
             )
         except (AttributeError, json.JSONDecodeError):
             pass

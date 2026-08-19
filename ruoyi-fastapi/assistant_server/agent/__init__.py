@@ -1,12 +1,12 @@
 """Household-agent orchestration for context-aware device control."""
 
+from .handlers import IntentContext, IntentHandler
 from .schemas import (
     AgentDecision,
     AgentRequest,
     HouseholdStateSnapshot,
     HouseholdStateUpdate,
 )
-from .handlers import IntentContext, IntentHandler
 from .service import HouseholdAgentService
 
 __all__ = [

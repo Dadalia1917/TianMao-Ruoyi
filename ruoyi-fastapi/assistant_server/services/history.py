@@ -5,7 +5,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from .config import Settings
+from ..core.config import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -64,9 +64,7 @@ class VoiceHistoryStore:
                 "已启用数据库持久化，但缺少 aiomysql；请执行 pip install -r requirements.txt"
             ) from exc
 
-        worker_count = min(
-            self.settings.database_workers, self.settings.mysql_pool_max_size
-        )
+        worker_count = min(self.settings.database_workers, self.settings.mysql_pool_max_size)
         shard_size = max(100, self.settings.database_queue_size // worker_count)
         self._queues = [asyncio.Queue(shard_size) for _ in range(worker_count)]
         self._pool = await aiomysql.create_pool(
@@ -136,9 +134,7 @@ class VoiceHistoryStore:
                 rows = await cursor.fetchall()
         return tuple(rows)
 
-    async def execute_now(
-        self, statement: str, values: tuple[Any, ...] = ()
-    ) -> int:
+    async def execute_now(self, statement: str, values: tuple[Any, ...] = ()) -> int:
         """Execute an immediate management write and return affected rows."""
         self._require_ready()
         async with self._pool.acquire() as connection:
@@ -180,11 +176,7 @@ class VoiceHistoryStore:
         )
 
     def activate_session(self, session_id: str, qwen_session_id: str) -> None:
-        self._enqueue(
-            _DatabaseEvent(
-                "activate", session_id, (qwen_session_id or None, session_id)
-            )
-        )
+        self._enqueue(_DatabaseEvent("activate", session_id, (qwen_session_id or None, session_id)))
 
     def add_message(
         self,
@@ -272,8 +264,7 @@ class VoiceHistoryStore:
                 "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'connecting')"
             ),
             "activate": (
-                "UPDATE ai_voice_session SET qwen_session_id=%s,status='active' "
-                "WHERE session_id=%s"
+                "UPDATE ai_voice_session SET qwen_session_id=%s,status='active' WHERE session_id=%s"
             ),
             "message": (
                 "INSERT INTO ai_voice_message "

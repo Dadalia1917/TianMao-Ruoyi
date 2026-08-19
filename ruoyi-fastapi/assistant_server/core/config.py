@@ -119,11 +119,9 @@ class Settings:
     agent_state_redis_db: int
 
     @classmethod
-    def from_env(cls) -> "Settings":
+    def from_env(cls) -> Settings:
         origins = tuple(
-            item.strip()
-            for item in os.getenv("ALLOWED_ORIGINS", "*").split(",")
-            if item.strip()
+            item.strip() for item in os.getenv("ALLOWED_ORIGINS", "*").split(",") if item.strip()
         )
         return cls(
             dashscope_api_key=os.getenv("DASHSCOPE_API_KEY", "").strip(),
@@ -131,30 +129,18 @@ class Settings:
                 "DASHSCOPE_REALTIME_URL",
                 "wss://dashscope.aliyuncs.com/api-ws/v1/realtime",
             ).strip(),
-            dashscope_model=os.getenv(
-                "DASHSCOPE_MODEL", "qwen3.5-omni-plus-realtime"
-            ).strip(),
+            dashscope_model=os.getenv("DASHSCOPE_MODEL", "qwen3.5-omni-plus-realtime").strip(),
             dashscope_voice=os.getenv("DASHSCOPE_VOICE", "Ethan").strip(),
-            realtime_vad_threshold=min(
-                1.0, max(0.0, _as_float("REALTIME_VAD_THRESHOLD", 0.5))
-            ),
-            realtime_vad_prefix_padding_ms=_as_int(
-                "REALTIME_VAD_PREFIX_PADDING_MS", 500, 100
-            ),
-            realtime_vad_silence_duration_ms=_as_int(
-                "REALTIME_VAD_SILENCE_DURATION_MS", 800, 200
-            ),
-            realtime_echo_guard_seconds=max(
-                0.0, _as_float("REALTIME_ECHO_GUARD_SECONDS", 3.0)
-            ),
+            realtime_vad_threshold=min(1.0, max(0.0, _as_float("REALTIME_VAD_THRESHOLD", 0.5))),
+            realtime_vad_prefix_padding_ms=_as_int("REALTIME_VAD_PREFIX_PADDING_MS", 500, 100),
+            realtime_vad_silence_duration_ms=_as_int("REALTIME_VAD_SILENCE_DURATION_MS", 800, 200),
+            realtime_echo_guard_seconds=max(0.0, _as_float("REALTIME_ECHO_GUARD_SECONDS", 3.0)),
             genie_provider_enabled=_as_bool("GENIE_PROVIDER_ENABLED", True),
             genie_provider_result_timeout_seconds=_as_int(
                 "GENIE_PROVIDER_RESULT_TIMEOUT_SECONDS", 8, 3
             ),
             acoustic_relay_enabled=_as_bool("ACOUSTIC_RELAY_ENABLED", False),
-            acoustic_relay_wake_phrase=os.getenv(
-                "ACOUSTIC_RELAY_WAKE_PHRASE", "天猫精灵"
-            ).strip()
+            acoustic_relay_wake_phrase=os.getenv("ACOUSTIC_RELAY_WAKE_PHRASE", "天猫精灵").strip()
             or "天猫精灵",
             host=os.getenv("HOST", "0.0.0.0").strip(),
             port=_as_int("PORT", 8001),
@@ -165,9 +151,7 @@ class Settings:
             upstream_rotate_seconds=_as_int("UPSTREAM_ROTATE_SECONDS", 6900, 300),
             client_event_max_bytes=_as_int("CLIENT_EVENT_MAX_BYTES", 262_144, 4096),
             client_queue_size=_as_int("CLIENT_QUEUE_SIZE", 256, 16),
-            ruoyi_auth_url=os.getenv(
-                "RUOYI_AUTH_URL", "http://127.0.0.1:8080/getInfo"
-            ).strip(),
+            ruoyi_auth_url=os.getenv("RUOYI_AUTH_URL", "http://127.0.0.1:8080/getInfo").strip(),
             ruoyi_auth_cache_seconds=_as_int("RUOYI_AUTH_CACHE_SECONDS", 60),
             database_enabled=_as_bool("DATABASE_ENABLED", True),
             mysql_host=os.getenv("MYSQL_HOST", "127.0.0.1").strip(),
@@ -193,39 +177,23 @@ class Settings:
             memory_max_items=_as_int("MEMORY_MAX_ITEMS", 50, 1),
             memory_queue_size=_as_int("MEMORY_QUEUE_SIZE", 2000, 10),
             memory_workers=_as_int("MEMORY_WORKERS", 2, 1),
-            memory_extraction_max_chars=_as_int(
-                "MEMORY_EXTRACTION_MAX_CHARS", 16000, 1000
-            ),
+            memory_extraction_max_chars=_as_int("MEMORY_EXTRACTION_MAX_CHARS", 16000, 1000),
             text_chat_enabled=_as_bool("TEXT_CHAT_ENABLED", True),
             text_chat_api_url=os.getenv(
                 "TEXT_CHAT_API_URL",
                 "https://dashscope.aliyuncs.com/compatible-mode/v1",
             ).strip(),
-            text_model_qwen38=os.getenv(
-                "TEXT_MODEL_QWEN38", "qwen3.8-max"
-            ).strip(),
-            text_model_qwen37=os.getenv(
-                "TEXT_MODEL_QWEN37", "qwen3.7-plus-2026-05-26"
-            ).strip(),
+            text_model_qwen38=os.getenv("TEXT_MODEL_QWEN38", "qwen3.8-max").strip(),
+            text_model_qwen37=os.getenv("TEXT_MODEL_QWEN37", "qwen3.7-plus-2026-05-26").strip(),
             text_model_qwen37_flash=os.getenv(
                 "TEXT_MODEL_QWEN37_FLASH", "qwen3.7-flash-2026-07-15"
             ).strip(),
-            text_model_deepseek=os.getenv(
-                "TEXT_MODEL_DEEPSEEK", "deepseek-v4-flash-0731"
-            ).strip(),
-            text_model_deepseek_pro=os.getenv(
-                "TEXT_MODEL_DEEPSEEK_PRO", "deepseek-v4-pro"
-            ).strip(),
-            text_model_deepseek_r1=os.getenv(
-                "TEXT_MODEL_DEEPSEEK_R1", "deepseek-r1-0528"
-            ).strip(),
+            text_model_deepseek=os.getenv("TEXT_MODEL_DEEPSEEK", "deepseek-v4-flash-0731").strip(),
+            text_model_deepseek_pro=os.getenv("TEXT_MODEL_DEEPSEEK_PRO", "deepseek-v4-pro").strip(),
+            text_model_deepseek_r1=os.getenv("TEXT_MODEL_DEEPSEEK_R1", "deepseek-r1-0528").strip(),
             text_max_connections=_as_int("TEXT_MAX_CONNECTIONS", 100, 1),
-            text_max_connections_per_user=_as_int(
-                "TEXT_MAX_CONNECTIONS_PER_USER", 3, 1
-            ),
-            text_request_max_bytes=_as_int(
-                "TEXT_REQUEST_MAX_BYTES", 524_288, 65_536
-            ),
+            text_max_connections_per_user=_as_int("TEXT_MAX_CONNECTIONS_PER_USER", 3, 1),
+            text_request_max_bytes=_as_int("TEXT_REQUEST_MAX_BYTES", 524_288, 65_536),
             text_max_messages=_as_int("TEXT_MAX_MESSAGES", 30, 2),
             text_max_chars=_as_int("TEXT_MAX_CHARS", 60_000, 1000),
             text_timeout_seconds=_as_int("TEXT_TIMEOUT_SECONDS", 240, 30),
@@ -234,33 +202,22 @@ class Settings:
                 "AGENT_API_URL",
                 "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
             ).strip(),
-            agent_model=os.getenv(
-                "AGENT_MODEL", "qwen3.8-max"
-            ).strip(),
+            agent_model=os.getenv("AGENT_MODEL", "qwen3.8-max").strip(),
             agent_timeout_seconds=_as_int("AGENT_TIMEOUT_SECONDS", 15, 3),
             agent_max_tool_rounds=_as_int("AGENT_MAX_TOOL_ROUNDS", 3, 1),
-            agent_location_name=os.getenv("AGENT_LOCATION_NAME", "无锡").strip()
-            or "无锡",
+            agent_location_name=os.getenv("AGENT_LOCATION_NAME", "无锡").strip() or "无锡",
             agent_latitude=_as_float("AGENT_LATITUDE", 31.4912),
             agent_longitude=_as_float("AGENT_LONGITUDE", 120.3119),
-            agent_timezone=os.getenv("AGENT_TIMEZONE", "Asia/Shanghai").strip()
-            or "Asia/Shanghai",
+            agent_timezone=os.getenv("AGENT_TIMEZONE", "Asia/Shanghai").strip() or "Asia/Shanghai",
             agent_weather_enabled=_as_bool("AGENT_WEATHER_ENABLED", True),
             agent_simulated_environment_enabled=_as_bool(
                 "AGENT_SIMULATED_ENVIRONMENT_ENABLED", True
             ),
-            agent_household_state_ttl_seconds=_as_int(
-                "AGENT_HOUSEHOLD_STATE_TTL_SECONDS", 300, 30
-            ),
-            agent_default_room=os.getenv("AGENT_DEFAULT_ROOM", "客厅").strip()
-            or "客厅",
-            agent_state_redis_host=os.getenv(
-                "AGENT_STATE_REDIS_HOST", ""
-            ).strip(),
+            agent_household_state_ttl_seconds=_as_int("AGENT_HOUSEHOLD_STATE_TTL_SECONDS", 300, 30),
+            agent_default_room=os.getenv("AGENT_DEFAULT_ROOM", "客厅").strip() or "客厅",
+            agent_state_redis_host=os.getenv("AGENT_STATE_REDIS_HOST", "").strip(),
             agent_state_redis_port=_as_int("AGENT_STATE_REDIS_PORT", 6379, 1),
-            agent_state_redis_password=os.getenv(
-                "AGENT_STATE_REDIS_PASSWORD", ""
-            ),
+            agent_state_redis_password=os.getenv("AGENT_STATE_REDIS_PASSWORD", ""),
             agent_state_redis_db=_as_int("AGENT_STATE_REDIS_DB", 1, 0),
         )
 
@@ -286,9 +243,7 @@ class Settings:
             errors.append("MYSQL_POOL_MIN_SIZE 不能大于 MYSQL_POOL_MAX_SIZE")
         if self.memory_enabled and not self.database_enabled:
             errors.append("MEMORY_ENABLED=true 时必须同时启用 DATABASE_ENABLED")
-        if self.memory_enabled and not self.memory_api_url.startswith(
-            ("http://", "https://")
-        ):
+        if self.memory_enabled and not self.memory_api_url.startswith(("http://", "https://")):
             errors.append("MEMORY_API_URL 必须是 http:// 或 https:// 地址")
         if self.text_chat_enabled and not self.text_chat_api_url.startswith(
             ("http://", "https://")
@@ -305,9 +260,7 @@ class Settings:
             )
         ):
             errors.append("文字对话模型 ID 不能为空")
-        if self.agent_enabled and not self.agent_api_url.startswith(
-            ("http://", "https://")
-        ):
+        if self.agent_enabled and not self.agent_api_url.startswith(("http://", "https://")):
             errors.append("AGENT_API_URL 必须是 http:// 或 https:// 地址")
         if self.agent_enabled and not self.agent_model:
             errors.append("AGENT_MODEL 不能为空")

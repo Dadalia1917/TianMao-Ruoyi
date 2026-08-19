@@ -1,4 +1,4 @@
-from assistant_server.config import Settings
+from assistant_server.core.config import Settings
 
 
 def test_model_query_is_added(monkeypatch):

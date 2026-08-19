@@ -5,14 +5,13 @@ import math
 import re
 import time
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
 import httpx
 
 from .schemas import Evidence
 from .state import HouseholdStateStore
-
 
 _WEATHER_DESCRIPTIONS = {
     0: "晴",
@@ -248,17 +247,21 @@ class HouseholdDataTools:
         }
         parts = [f"{room}{period}"]
         if indoor_temperature is not None:
-            prefix = "实测" if field_sources.get("indoor_temperature_c") == "live_sensor" else "模拟"
+            prefix = (
+                "实测" if field_sources.get("indoor_temperature_c") == "live_sensor" else "模拟"
+            )
             parts.append(f"{prefix}室温{float(indoor_temperature):.1f}℃")
         if indoor_humidity is not None:
-            prefix = "实测" if field_sources.get("indoor_humidity_percent") == "live_sensor" else "模拟"
+            prefix = (
+                "实测" if field_sources.get("indoor_humidity_percent") == "live_sensor" else "模拟"
+            )
             parts.append(f"{prefix}湿度{float(indoor_humidity):.0f}%")
         if illuminance is not None:
             prefix = "实测" if field_sources.get("illuminance_lux") == "live_sensor" else "模拟"
             parts.append(f"{prefix}照度{float(illuminance):.0f} lx")
         if preferred_temperature is not None:
             parts.append(f"账号偏好{preferred_temperature}℃")
-        reliability = "high" if live_is_fresh else "low"
+        reliability: Literal["high", "low"] = "high" if live_is_fresh else "low"
         source = live.source if live_is_fresh and live else "household-state fallback simulator"
         return Evidence(
             kind="household_state",

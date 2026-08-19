@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-
 HOUSEHOLD_AGENT_PROMPT = """你是家庭生活事务协调智能体中的设备规划器，不是闲聊助手。
 你的任务是把已经确认属于低风险家居控制的用户请求，转换为一条可由本机天猫精灵执行的短命令。
 
@@ -31,9 +30,7 @@ WELLBEING_ADVICE_PROMPT = """你是家庭生活事务协调智能体中的生活
 """
 
 
-def build_user_prompt(
-    transcript: str, location_name: str, memory_context: str = ""
-) -> str:
+def build_user_prompt(transcript: str, location_name: str, memory_context: str = "") -> str:
     prompt = (
         f"家庭所在位置：{location_name}\n"
         f"用户原话：{transcript}\n"

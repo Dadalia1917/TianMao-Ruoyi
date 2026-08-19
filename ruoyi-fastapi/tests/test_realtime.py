@@ -1,10 +1,10 @@
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
-from assistant_server.config import Settings
 from assistant_server.agent.schemas import AgentDecision, DecisionStatus, DeviceAction
+from assistant_server.core.config import Settings
 from assistant_server.realtime import (
     CapacityError,
     ConnectionLimiter,
@@ -18,13 +18,13 @@ from assistant_server.realtime import (
     classify_upstream_connection_error,
     combine_home_commands,
     extract_confirmed_home_addition,
+    extract_home_control_command,
     extract_pending_home_addition,
     extract_pending_home_replacement,
     extract_wake_request,
-    extract_home_control_command,
-    is_probable_assistant_echo,
     is_conversation_exit,
     is_pending_replan_request,
+    is_probable_assistant_echo,
     should_start_acoustic_relay,
 )
 
@@ -235,7 +235,7 @@ def test_additive_replan_keeps_both_commands_until_final_confirmation():
                     parameters={"temperature_c": 26},
                     requires_confirmation=True,
                 ),
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
 
     class FakeWriter:
@@ -276,7 +276,7 @@ def test_additive_replan_keeps_both_commands_until_final_confirmation():
             FakeAgent(),
         )
 
-        await proxy._plan_and_dispatch_home_command(
+        await proxy.home_actions.plan_and_dispatch(
             writer=writer,
             upstream=upstream,
             wake_state=wake_state,
@@ -294,16 +294,12 @@ def test_additive_replan_keeps_both_commands_until_final_confirmation():
             "打开客厅音乐播放器并播放舒缓音乐",
             "打开空调并设置为26度",
         ]
-        assert any(
-            event.get("status") == "awaiting_confirmation"
-            for event in writer.events
-        )
+        assert any(event.get("status") == "awaiting_confirmation" for event in writer.events)
         assert not any(
-            event.get("type") == "assistant.home_command.pending"
-            for event in writer.events
+            event.get("type") == "assistant.home_command.pending" for event in writer.events
         )
 
-        await proxy._submit_home_action(
+        await proxy.home_actions.submit(
             action=merged,
             writer=writer,
             upstream=upstream,
@@ -315,7 +311,7 @@ def test_additive_replan_keeps_both_commands_until_final_confirmation():
             if event.get("type") == "assistant.home_command.pending"
         )
         assert pending_event["commands"] == merged.commands
-        proxy._clear_pending_home_result(wake_state)
+        proxy.home_actions.clear_pending_result(wake_state)
 
     asyncio.run(run())
 
@@ -344,9 +340,7 @@ def test_wake_prefixed_exit_can_be_interpreted_after_pending_restart_parse():
         ("unknown", "failed", "没有提交成功"),
     ),
 )
-def test_native_home_receipt_never_claims_device_execution(
-    status, outcome, message_fragment
-):
+def test_native_home_receipt_never_claims_device_execution(status, outcome, message_fragment):
     actual_outcome, reply = classify_home_command_result(status)
     assert actual_outcome == outcome
     assert message_fragment in reply
@@ -355,9 +349,9 @@ def test_native_home_receipt_never_claims_device_execution(
 
 def test_low_risk_home_command_uses_local_genie_provider_prompt():
     settings = Settings.from_env()
-    instructions = build_session_update(
-        settings, genie_provider_available=True
-    )["session"]["instructions"]
+    instructions = build_session_update(settings, genie_provider_available=True)["session"][
+        "instructions"
+    ]
 
     assert "本机智能家居指令通道" in instructions
     assert "执行了 ADB" in instructions
@@ -368,10 +362,7 @@ def test_low_risk_home_command_uses_local_genie_provider_prompt():
     assert extract_home_control_command("请把厨房灯关了") == "把厨房灯关了"
     assert extract_home_control_command("让天猫精灵开灯") == "开灯"
     assert extract_home_control_command("请天猫精灵打开卧室灯") == "打开卧室灯"
-    assert (
-        extract_home_control_command("帮我打开天猫精灵，让天猫精灵开灯")
-        == "开灯"
-    )
+    assert extract_home_control_command("帮我打开天猫精灵，让天猫精灵开灯") == "开灯"
 
 
 @pytest.mark.parametrize(
@@ -397,9 +388,9 @@ def test_common_low_risk_home_devices_share_provider_channel(transcript, expecte
 def test_browser_without_native_bridge_does_not_claim_local_control(monkeypatch):
     monkeypatch.setenv("GENIE_PROVIDER_ENABLED", "true")
     monkeypatch.setenv("ACOUSTIC_RELAY_ENABLED", "false")
-    instructions = build_session_update(
-        Settings.from_env(), genie_provider_available=False
-    )["session"]["instructions"]
+    instructions = build_session_update(Settings.from_env(), genie_provider_available=False)[
+        "session"
+    ]["instructions"]
 
     assert "没有可用的本机智能家居控制通道" in instructions
     assert "本机智能家居指令通道" not in instructions

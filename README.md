@@ -8,15 +8,15 @@
 | --- | --- |
 | 产品名称 | 天猫智家·千问智能语音助手 |
 | English name | Tmall Smart Home Qwen Voice Assistant |
-| 产品版本 | **v1.1.2** |
-| 版本更新时间 | **2026.08.17（UTC+8）** |
-| 文档交接更新时间 | **2026.08.17（UTC+8）** |
-| 当前阶段 | v1.1.2 Agent、T10S APK 与正式阿里云三项业务服务已完成并验收 |
+| 产品版本 | **v1.2.0** |
+| 版本更新时间 | **2026.08.19（UTC+8）** |
+| 文档交接更新时间 | **2026.08.19（UTC+8）** |
+| 当前阶段 | v1.2.0 FastAPI 工程化重构与本地回归完成；v1.1.2 APK、T10S 和正式云端仍是已验收交付基线 |
 | 适用终端 | 天猫智慧工控屏、Android、桌面 H5 |
 | 开发单位 | 无锡捷普迅智能科技有限公司 |
 | 基础框架 | RuoYi 3.9.2 派生工程 |
 
-> 版本说明：**v1.1.2 是本产品版本**；Maven 和 ruoyi-ui 中的 3.9.2 是继承的 RuoYi 工程/依赖版本，两者含义不同，不应互相替换。
+> 版本说明：**v1.2.0 是当前源码与文档版本**；Maven 和 ruoyi-ui 中的 3.9.2 是继承的 RuoYi 工程/依赖版本，两者含义不同，不应互相替换。v1.2.0 尚未重新打包 APK、覆盖安装 T10S 或部署正式云端，因此这些交付物继续如实标记为 v1.1.2。
 
 ## 核心技术架构
 
@@ -40,13 +40,14 @@ uni-app 3 消费者端 ───┘               │
 
 > Java 版本说明：当前开发运行环境使用 **JDK 26.0.1**。Maven `pom.xml` 与生产 Docker 镜像仍保留 Java 17 字节码/运行时兼容配置；如要让构建产物仅面向 Java 26，应同步调整 Maven 编译目标和 Docker 基础镜像后再执行完整回归测试。
 
-> Python 版本说明：本机默认复用已有 YOLO Conda **Python 3.14.4** 环境进行测试，不再临时新建 Python 环境；`fastapi.Dockerfile` 已升级为官方 **Python 3.14.6-slim**。2026.08.17 本机 `133 passed`，Linux 镜像依赖安装与构建成功。若以后线上健康检查或业务回归出现 3.14 特有问题，再把基础镜像回滚到 3.11。
+> Python 版本说明：本机默认复用已有 YOLO Conda **Python 3.14.6** 环境进行测试，不再临时新建 Python 环境；`fastapi.Dockerfile` 使用官方 **Python 3.14.6-slim**。v1.1.2 在 2026.08.17 的历史验收环境为 Python 3.14.4、`133 passed`，并完成 Linux 镜像构建；v1.2.0 在 2026.08.19 使用当前解释器和 YOLO Python 3.14.6 均通过 `142 passed`。若以后线上健康检查或业务回归出现 3.14 特有问题，再把基础镜像回滚到 3.11。
 
 ## 文档导航
 
 - [核心技术架构](#核心技术架构)
-- [版本发布记录](#版本发布记录v112--v100)
-  - [v1.1.2（当前版本）](#v112)
+- [版本发布记录](#版本发布记录v120--v100)
+  - [v1.2.0（当前版本）](#v120)
+  - [v1.1.2](#v112)
   - [v1.1.1](#v111)
   - [v1.1.0](#v110)
   - [v1.0.0](#v100)
@@ -64,16 +65,43 @@ uni-app 3 消费者端 ───┘               │
 
 ---
 
-## 版本发布记录（v1.1.2 → v1.0.0）
+## 版本发布记录（v1.2.0 → v1.0.0）
 
 本节统一按“新版本在前”的顺序记录。每个版本均明确列出更新时间、框架/技术基线、功能点和验收产物；下方折叠区仅保留早期原始验收文字，避免与当前版本顺序混在一起。
 
 | 版本 | 更新时间（UTC+8） | 框架/技术重点 | 版本定位 |
 | --- | --- | --- | --- |
-| **v1.1.2（当前）** | **2026.08.17** | Python 3.14、LangGraph、Qwen3.8-Max、T10S GenieApi | Agent 自由确认、多动作保序追加与有界智能选择正式版 |
+| **v1.2.0（当前源码）** | **2026.08.19** | FastAPI 薄入口、core/controller/service/realtime 分层、结构化并发、Ruff/pytest | AI 网关工程化、低耦合与会话任务回收重构版 |
+| v1.1.2（当前已交付） | 2026.08.17 | Python 3.14、LangGraph、Qwen3.8-Max、T10S GenieApi | Agent 自由确认、多动作保序追加与有界智能选择正式版 |
 | v1.1.1 | 2026.08.14 20:04:17 | Qwen Function Calling、AudioWorklet、Provider 回执 | 情境 Agent、语音回灌抑制与真实提交回执版 |
 | v1.1.0 | 2026.08.14 18:22:47 | LangGraph StateGraph、Android ContentProvider | Agent 与 T10S 本机控制链路首个版本 |
 | v1.0.0 | 2026.08.11 | RuoYi、Vue 3、uni-app、FastAPI、Qwen3.5 Omni | 账号、语音、文字、记忆、运营后台和云端部署基线 |
+
+### v1.2.0
+
+更新时间：**2026.08.19（UTC+8）**
+
+#### 框架与技术基线
+
+- 保留 RuoYi 3.9.2、Spring Boot、Vue 3、uni-app、Qwen3.5 Omni、LangGraph、MySQL、Redis 和 T10S `GenieApi / method=15` 既有业务基线；本版不修改数据库表、客户端事件名、HTTP/WebSocket 路径或家电控制协议。
+- FastAPI 参考 `RuoYi-Vue3-FastAPI-master/ruoyi-fastapi-backend` 的 `app.py`、`server.py`、config、middlewares 与 controller/service 分层方式，落地 `create_app()` 应用工厂、`ApplicationServices` 运行时容器以及 `core`、`api/controllers`、`services`、`realtime`、`agent` 明确边界。
+- 新增标准 `pyproject.toml`，统一项目版本、Python 版本边界、运行/开发依赖、pytest 发现规则以及 Ruff lint/format 规范；仍保留 `requirements.txt` 兼容现有 Docker 构建。
+
+#### 功能与工程变更
+
+- 根 `main.py` 从集中承载配置、启动、HTTP、WebSocket 和资源回收的 425 行入口缩减为兼容 ASGI/Docker 的薄入口；本地继续支持 `python main.py`，生产继续支持 `uvicorn main:app`。
+- HTTP 鉴权提取为 FastAPI 依赖并在 OpenAPI 中声明 Bearer 安全方案；CORS 和应用异常处理集中注册，所有原有 REST 路径和响应语义保持兼容。
+- 历史数据库先完成初始化，互不依赖的记忆、文字模型和 Agent 使用 `asyncio.TaskGroup` 原子并发启动；生命周期通过 `AsyncExitStack` 按逆序释放资源，任一初始化失败都会取消同组任务并关闭已创建连接。
+- WebSocket 首包统一执行大小、JSON 对象和消息类型校验；浏览器、HBuilderX 与原生 WebView 的 Origin 兼容规则保持不变。
+- 实时语音进一步拆为 protocol、session、transport、home_actions、gateway；`TaskSupervisor` 统一观察异常、取消并等待规划/回执任务，避免后台任务继续向已关闭连接写入。
+- 长期记忆存储和实时网关通过 Protocol 接口依赖历史、记忆与 Agent 能力，控制器仅依赖服务容器，不再耦合具体基础设施实现。
+- 新增应用工厂、控制器目录、并发启动、受控任务、生命周期、401 响应、按应用解析默认房间以及启动失败清理测试；既有 Agent、语音、记忆、认证和文字对话测试全部保留。
+
+#### 验收与交付状态
+
+- 本地 FastAPI 在当前 Python 3.13.9 与 YOLO Python 3.14.6 下均为 `142 passed`；Ruff lint、Ruff format check、`compileall` 和全部 38 个源码模块的 mypy 检查全部通过。Python 3.14.6 仍有一条 LangChain Core 的 Pydantic V1 兼容提示，不影响测试结果，本轮未修改共享 Conda 环境。
+- v1.2.0 当前是源码与文档基线，FastAPI `/`、`/health/ready` 和 Python 包元数据均返回/标记 `1.2.0`；消费者端展示版本同步为 `1.2.0`。
+- 本轮未构建 H5/App、Android Release 或 Docker 镜像，未覆盖安装 T10S，也未部署正式阿里云。现有已签名 APK、T10S 安装包和正式云端仍为经验证的 v1.1.2，禁止把它们误写成 v1.2.0 已发布。
 
 ### v1.1.2
 
@@ -1021,9 +1049,16 @@ RuoYi/
 ├─ ruoyi-framework/                  # Spring Security、Web 与基础配置
 ├─ ruoyi-system/                     # 用户、权限、语音会话和记忆领域服务
 ├─ ruoyi-common/                     # 通用组件
-├─ ruoyi-fastapi/                    # AI 网关，一条 main.py 命令启动
-│  ├─ main.py
+├─ ruoyi-fastapi/                    # AI 网关；main.py 保留兼容启动入口
+│  ├─ main.py                       # 薄 ASGI/本地启动入口
+│  ├─ pyproject.toml                # 项目元数据、pytest 与 Ruff 规范
 │  ├─ assistant_server/
+│  │  ├─ application.py             # create_app 应用工厂
+│  │  ├─ core/                      # 配置、容器、生命周期、中间件、异常与并发
+│  │  ├─ api/controllers/           # HTTP/WebSocket 控制器与鉴权依赖
+│  │  ├─ services/                  # 鉴权、历史、记忆、文字模型与接口契约
+│  │  ├─ realtime/                  # 协议、会话、传输、家居动作与网关编排
+│  │  └─ agent/                     # LangGraph Agent、策略、状态与工具
 │  ├─ tests/
 │  ├─ requirements.txt
 │  └─ .env.example
@@ -1276,7 +1311,7 @@ curl -fsS http://127.0.0.1/health/ready
 
 - <code>baseUrl</code>：Java API 地址。
 - <code>assistant.baseUrl</code>：FastAPI AI 网关地址。
-- <code>appInfo.version</code>：当前产品版本，v1.1.2。
+- <code>appInfo.version</code>：当前源码展示版本，v1.2.0；现有已签名 APK 仍为 v1.1.2，重新打包前还需同步 Android 构建元数据。
 
 这些值在消费者界面中不提供编辑入口。
 
@@ -1374,6 +1409,8 @@ mvn test
 # FastAPI
 cd ruoyi-fastapi
 python -m pytest
+python -m ruff check .
+python -m ruff format --check .
 
 # 运营后台
 cd ..\ruoyi-ui
@@ -1406,16 +1443,16 @@ npm run build:prod
 
 ## 18. 后续路线
 
-当前稳定基线为 `v1.1.2`。多场景 Agent 建议、自由补充执行、天猫精灵内部 `GenieApi` 控制、T10S 覆盖安装、云端 Python 3.14.6 部署及 v1.1.1 单一回滚包均已完成，不再列为后续事项。
+当前源码基线为 `v1.2.0`，FastAPI 工程化重构已完成；当前正式交付基线仍为 `v1.1.2`，其多场景 Agent、自由补充执行、天猫精灵内部 `GenieApi` 控制、T10S 覆盖安装、云端 Python 3.14.6 部署及 v1.1.1 单一回滚包均已完成。本节把“源码已完成”和“交付物已发布”分开记录。
 
-### v1.1.x：稳定性与交付完善
+### v1.2.x：稳定性与交付完善
 
 - 完善 Android 前后台生命周期、系统返回键、断网提示与重连终止状态。
 - 将临时公网 IP/明文 WS 迁移到正式域名、HTTPS/WSS，并补齐 Caddy 自动续证、日志轮转和监控告警。
 - 持续回归 T10S 的 `ContentProvider` 调用、执行回执和等待唤醒状态，防止系统升级后出现兼容性退化。
 - 增加长期记忆编辑、纠错和过期管理，继续优化记忆命中率与提取延迟。
 
-### v1.2.x：Agent 与智能家居深化
+### v1.3.x：Agent 与智能家居深化
 
 - 保持天猫精灵内部 `GenieApi` 为家电控制通道；按实际硬件条件选配传感器、网关或 Home Assistant 状态适配器，Home Assistant 不作为当前控制链路的前置依赖。
 - 接入真实室内照度、温湿度、人体存在和设备状态，逐步替换未接硬件环境下的模拟兜底值。
@@ -1438,12 +1475,13 @@ npm run build:prod
 
 | 项目 | 基线 |
 | --- | --- |
-| 产品/服务/APK | v1.1.2 |
+| 当前源码/README/FastAPI | v1.2.0（2026.08.19，本地重构与回归完成） |
 | 云端状态 | 正式 120 服务器的 Java、FastAPI、Web 网关均为 v1.1.2；Python 3.14.6；内部健康检查 ready |
 | T10S | 已安装签名 v1.1.2（versionCode 112）；包名 `com.jpx.tmallsmarthome` |
 | 语音与 Agent 联动正式包 | `versionCode=112`，SHA-256 `90B8BC6F90FD91E9E1698541611C19D68D555CC99FF96E2759A8B1454E0F1191`；本地与 T10S 已更新 |
 | 家电控制 | T10S 天猫精灵内部 `GenieApi / method=15` 文字指令；不依赖 Home Assistant |
-| 数据库 | v1.1.2 无 MySQL 迁移；短时家庭状态继续使用 Redis |
+| 数据库 | v1.2.0 无 MySQL 迁移；短时家庭状态继续使用 Redis |
+| v1.2.0 待交付项 | H5/App 构建、Android `versionName/versionCode`、签名 APK、T10S 覆盖安装、Docker 镜像与正式云端部署均未执行 |
 | 后续边界 | 可选接入传感器/网关补充物理状态反馈，不替换现有天猫精灵控制通道 |
 
 ### 19.2 通用交接规则
@@ -1461,7 +1499,7 @@ npm run build:prod
 
 ### 19.3 后续建议执行顺序
 
-1. 检查 Git 工作区、当前 v1.1.2 产物哈希和现网健康状态，不覆盖未提交修改。
+1. 检查 Git 工作区、当前 v1.1.2 交付产物哈希和现网健康状态，不覆盖未提交修改；不要仅凭源码版本把现网标记为 v1.2.0。
 2. 保持 `qwen3.8-max` 单总控 Agent 和天猫精灵内部 `GenieApi` 控制通道；不要把 Home Assistant 误写成当前依赖。
 3. 如需补充真实温湿度、照度或物理设备结果，优先通过现有家庭状态接口接入传感器/网关，并保留来源与时效标记。
 4. 若实际测试家电，必须选定目标设备并经现场人员确认；验收记录区分“Provider 已接受提交”和“物理设备状态已反馈”。
@@ -1490,6 +1528,6 @@ npm run build:prod
 
 ---
 
-**当前文档基线：天猫智家 v1.1.2 · 2026 年 8 月 17 日（UTC+8）**
+**当前文档基线：天猫智家 v1.2.0 · 2026 年 8 月 19 日（UTC+8）**
 
-**当前构建状态：v1.1.2 已完成 FastAPI 133 项测试、H5/App、Android Release、v1/v2 签名、T10S 覆盖安装与阿里云部署；云端 AI 网关运行 Python 3.14.6。正式控制通道仍是天猫精灵内部 `GenieApi / method=15`，所有 Agent 家电建议必须经用户确认；复合追加语义会保留两项动作，客户端把音乐放在队列末尾并确认持续播放。当前 T10S 天猫账号未找到可操作空调，需先完成设备绑定或名称校准。**
+**当前构建状态：v1.2.0 FastAPI 源码已完成 core/controller/service/realtime 分层与结构化并发重构；Python 3.13.9 与 YOLO Python 3.14.6 均为 `142 passed`，Ruff、格式、编译与全部源码 mypy 检查通过。尚未构建 H5/App、Android Release、Docker 镜像或部署云端；已签名 APK、T10S 和正式阿里云仍保持经验证的 v1.1.2。正式控制通道仍是天猫精灵内部 `GenieApi / method=15`，所有 Agent 家电建议必须经用户确认。**

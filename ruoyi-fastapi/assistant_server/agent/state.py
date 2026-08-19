@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote
 
@@ -63,9 +63,7 @@ class HouseholdStateStore:
             await client.ping()
         except RedisError:
             await client.aclose()
-            logger.exception(
-                "household state Redis unavailable; falling back to local memory"
-            )
+            logger.exception("household state Redis unavailable; falling back to local memory")
             return
         self._redis = client
         logger.info(
@@ -83,14 +81,14 @@ class HouseholdStateStore:
 
     @staticmethod
     def _utc_now() -> datetime:
-        return datetime.now(timezone.utc)
+        return datetime.now(UTC)
 
     @staticmethod
     def _aware(value: datetime | None) -> datetime:
         value = value or HouseholdStateStore._utc_now()
         if value.tzinfo is None:
-            return value.replace(tzinfo=timezone.utc)
-        return value.astimezone(timezone.utc)
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
 
     async def update(
         self, user_id: str, room: str, update: HouseholdStateUpdate
@@ -193,10 +191,9 @@ class HouseholdStateStore:
 
     @staticmethod
     def _redis_key(key: tuple[str, str]) -> str:
-        return "tmall:household-state:%s:%s" % (
-            quote(key[0], safe=""),
-            quote(key[1], safe=""),
-        )
+        user_key = quote(key[0], safe="")
+        room_key = quote(key[1], safe="")
+        return f"tmall:household-state:{user_key}:{room_key}"
 
     @staticmethod
     def _encode(item: dict[str, Any]) -> str:
@@ -204,9 +201,7 @@ class HouseholdStateStore:
             item,
             ensure_ascii=False,
             separators=(",", ":"),
-            default=lambda value: value.isoformat()
-            if isinstance(value, datetime)
-            else str(value),
+            default=lambda value: value.isoformat() if isinstance(value, datetime) else str(value),
         )
 
     @staticmethod

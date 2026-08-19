@@ -2,8 +2,8 @@ import asyncio
 
 import pytest
 
-from assistant_server.auth import AuthenticationError, RuoYiAuthenticator
-from assistant_server.config import Settings
+from assistant_server.core.config import Settings
+from assistant_server.services.authentication import AuthenticationError, RuoYiAuthenticator
 
 
 def test_missing_token_is_rejected():
@@ -16,4 +16,3 @@ def test_missing_token_is_rejected():
             await authenticator.close()
 
     asyncio.run(run())
-
