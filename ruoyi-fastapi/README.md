@@ -1,20 +1,20 @@
 # 天猫智家实时语音服务
 
-**产品版本：v1.2.0 · 文档更新时间：2026.08.19（UTC+8）**
+**产品版本：v1.2.1 · 文档更新时间：2026.08.21（UTC+8）**
 
-> 源码状态（2026.08.19）：v1.2.0 已参考 `RuoYi-Vue3-FastAPI-master/ruoyi-fastapi-backend` 完成薄入口、应用工厂、控制器、核心运行时、领域服务和实时语音模块分层；补充结构化并发、Protocol 依赖边界、项目元数据、Ruff 规范、应用层测试及断线任务回收。HTTP/WebSocket 路径、Agent 业务策略、数据库结构和 T10S 控制协议保持兼容。
+> 源码状态（2026.08.21）：v1.2.1 保留薄入口、应用工厂、控制器、核心运行时、领域服务、实时语音分层和结构化并发；Agent 改为显式分派、单一意图入口、集中命令归一化与计划构建，不再依赖 LangGraph/完整 LangChain 工作流。HTTP/WebSocket 路径、数据库结构和 T10S 控制协议保持兼容。
 
-> 交付状态：正式阿里云 `ai-gateway`、已签名 APK 和 T10S 当前仍是经验证的 v1.1.2。本轮尚未构建 Docker 镜像、Android Release 或部署云端，不能把现网或旧 APK 标记为 v1.2.0。
+> 交付状态：正式阿里云 `ai-gateway`、已签名 APK 和 T10S 当前仍是经验证的 v1.1.2。本轮尚未同步构建元数据、构建 Docker 镜像/Android Release 或部署云端，不能把现网或旧 APK 标记为 v1.2.1。
 
 > 控制边界：确认后的命令继续由 T10S 天猫精灵内部 `GenieApi / method=15` 执行，不接入也不依赖 Home Assistant。Provider 接受只表示已提交。正式服务器是 `120.55.64.225`；`139.196.94.58` 只是旧 DeepSeek Webhook，禁止覆盖。
 
 完整的软件说明、技术栈、UML、ER 图、接口总表和部署指南请阅读仓库根目录 `README.md`。
 
-当前版本负责已登录用户的实时语音对话、六模型文字对话、自动续接、账号长期记忆和智能家居 Agent。v1.2.0 使用显式单总控路由、`qwen3.8-max` Function Calling、确定性安全策略与环境工具，把低风险计划转换为待确认事件；疲劳、压力和想放松先建议休息、补水，再按室内状态、室外天气和同账号最近一次建议，从当前合理的空调、风扇、音乐播放器中做轻度随机选择，连续提出同类感受时会在安全可行的候选中避开上一设备。用户可自然同意、拒绝、追加动作、换方案、发起新请求、重新唤醒或结束对话；“并且/顺带/另外再”以及没有替换词的设备补充都保留原方案，例如“可以帮我播放音乐，并且帮我打开空调”会保留音乐并提取空调为追加动作；只有“改成/换成/只要/不需要原方案而是……”才替换，单独说“不需要”取消本轮。最终确认后以有序 `commands` 数组交给 T10S Android，由 Android 先执行普通家电、最后执行音乐并校验播放状态，避免后续天猫对话抢占音乐焦点。Home Assistant 当前未接入且不是控制前置条件；未来的传感器或网关只作为可选状态来源。
+当前版本负责已登录用户的实时语音对话、文字对话、自动续接、账号长期记忆和智能家居 Agent。v1.2.1 的家居建议和 Agent 规划只使用开启 thinking 的 `qwen3.8-max`，普通实时语音固定使用 `qwen3.5-omni-plus-realtime`，不为 Agent 启用其他模型或回退模型。单一意图入口统一处理设备控制、情境建议、确认/取消、追加/替换和安全阻断；“并且/顺带/另外”追加动作，“只要/改成/换成”替换旧方案，冲突动作在待确认前即被消解。最终确认后以有序 `commands` 数组交给 T10S Android，由 Android 先执行普通家电、最后执行音乐并校验播放状态。Home Assistant 当前未接入且不是控制前置条件；未来的传感器或网关只作为可选状态来源。
 
 ## 一键启动
 
-本机默认使用现有 `C:\Users\29556\.conda\envs\yolo\python.exe`（当前 Python 3.14.6）测试，不再为普通回归临时创建环境。Docker 固定到官方 `python:3.14.6-slim`。v1.1.2 已完成镜像构建与历史 `133 passed`；v1.2.0 在当前解释器和 YOLO Python 3.14.6 下均完成 `142 passed`。线上若出现 3.14 特有问题，回滚基础镜像到 Python 3.11。
+本机默认使用现有 `C:\Users\29556\.conda\envs\yolo\python.exe`（当前 Python 3.14.6）测试，不再为普通回归临时创建环境。Docker 固定到官方 `python:3.14.6-slim`。v1.1.2 已完成镜像构建与历史 `133 passed`，v1.2.0 为 `142 passed`；v1.2.1 在 2026.08.21 完成 `145 passed`，Ruff、格式检查和 mypy 均通过。线上若出现 3.14 特有问题，回滚基础镜像到 Python 3.11。
 
 ```powershell
 cd E:\无锡捷普迅智能科技有限公司\天猫精灵\天猫精灵安卓APK\RuoYi\ruoyi-fastapi
@@ -98,7 +98,7 @@ python -m compileall -q assistant_server main.py
 python -m mypy assistant_server --ignore-missing-imports --check-untyped-defs
 ```
 
-2026.08.19 验收结果：系统 Python 3.13.9 与 YOLO Python 3.14.6 均为 `142 passed`；Ruff lint、Ruff format check、`compileall` 和全部 38 个源码模块的 mypy 检查通过。YOLO 环境会输出一条 LangChain Core 的 Pydantic V1/Python 3.14 兼容提示，未导致测试失败，本轮没有修改该共享 Conda 环境。验证产生的 `.pytest_cache`、`.mypy_cache`、`.ruff_cache` 和 `__pycache__` 均为临时目录，交付前统一删除，不纳入源码。
+2026.08.21 验收结果：YOLO Python 3.14.6 为 `145 passed`；Ruff lint、Ruff format check 和 mypy 检查通过。验证产生的 `.pytest_cache`、`.mypy_cache`、`.ruff_cache` 和 `__pycache__` 均为临时目录，不纳入源码。
 
 `pyproject.toml` 是 pytest、Ruff 和包版本的统一配置源；运行依赖仍同步保留在 `requirements.txt`，以兼容现有 Dockerfile。修改依赖时必须同时更新两处。
 
@@ -115,7 +115,7 @@ python -m mypy assistant_server --ignore-missing-imports --check-untyped-defs
 
 ## 常见开发问题
 
-- `GET /api/v1/memories 404`：通常是修改源码后仍在运行旧 FastAPI 进程。结束原来的 `main.py`，重新启动后确认根接口返回当前源码版本 `1.2.0`，并在 `/docs` 中看到记忆路由。`OPTIONS 200` 只说明 CORS 中间件响应正常，不能证明业务路由已加载。
+- `GET /api/v1/memories 404`：通常是修改源码后仍在运行旧 FastAPI 进程。结束原来的 `main.py`，重新启动并在 `/docs` 中确认记忆路由；正式 v1.2.1 发包前还需同步 `pyproject.toml` 等构建元数据。`OPTIONS 200` 只说明 CORS 中间件响应正常，不能证明业务路由已加载。
 - 浏览器提示 `ScriptProcessorNode is deprecated`：这是 AudioWorklet 静态文件未加载时的兼容回退警告，不会中断语音。停止并重新运行 HBuilderX H5、执行一次强制刷新；当前页面会尝试应用路径、站点根路径和 Blob 三种方式加载 AudioWorklet。
 
 ## 实时链路
@@ -207,12 +207,12 @@ APP 的可回看历史默认保存在设备本地并按 RuoYi 用户 ID 分区�
 
 ## 智能家居 Agent
 
-v1.2.0 继续把 Agent 作为 FastAPI 内部独立模块，代码位于 `assistant_server/agent/`。意图入口位于 `handlers.py`，由 `IntentHandlerRegistry` 按优先级选择健康风险、禁用设备、放松、舒适、身心状态、明确设备控制或兜底 Handler；显式分派器负责规划、环境取证与最终校验。家居建议与 Agent 规划只使用开启 thinking 的 `qwen3.8-max`，不配置其他 Agent 回退模型；普通语音仍由 Qwen3.5 Omni 实时处理。新增情境可实现 `IntentHandler` 并调用 `register_intent_handler()` 注册，无需修改 `_analyze` 条件链；当前 Handler 名称和优先级通过 `/api/v1/agent/capabilities` 返回。
+v1.2.1 继续把 Agent 作为 FastAPI 内部独立模块，代码位于 `assistant_server/agent/`。单一意图入口统一分类健康风险、禁用设备、情境建议、明确设备控制、确认/取消、追加/替换和普通对话；显式分派器负责环境取证、规划、命令归一化、冲突消解与最终校验。家居建议与 Agent 规划只使用开启 thinking 的 `qwen3.8-max`，不配置其他 Agent 回退模型；普通语音仍由 Qwen3.5 Omni 实时处理。新增情境应扩展独立的意图/策略定义，不再增加平行的总控流程。
 
 ```text
 Omni 最终转写
-  -> IntentHandler 优先级注册表（普通聊天仍走实时直连）
-  -> 显式路由：分析 -> 风险/澄清/环境规划 -> 最终校验
+  -> 单一意图入口（普通聊天仍走实时直连）
+  -> 显式分派：分类 -> 风险/澄清/环境规划 -> 归一化/冲突消解 -> 最终校验
   -> 天气工具或模拟照度工具
   -> Qwen3.8-Max Function Calling 提交严格 ModelPlan/WellbeingAdvice
   -> 播报家庭状态、依据、推荐参数和拟执行动作，进入待确认状态
