@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Protocol
 
-from ..agent import AgentDecision, AgentRequest
+from ..agent import AgentDecision, AgentRequest, IntentEntrypoint
 
 
 class VoiceHistory(Protocol):
@@ -65,10 +65,8 @@ class RealtimeMemory(Protocol):
 
 
 class HouseholdPlanner(Protocol):
-    """Planning boundary that keeps LangGraph details out of the voice gateway."""
+    """Planning boundary used by the realtime voice gateway."""
 
-    def might_be_home_request(self, transcript: str) -> bool: ...
-
-    def might_be_advice_only_request(self, transcript: str) -> bool: ...
+    def classify_entrypoint(self, transcript: str) -> IntentEntrypoint: ...
 
     async def plan(self, request: AgentRequest) -> AgentDecision: ...

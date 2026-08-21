@@ -4,6 +4,7 @@ import re
 from difflib import SequenceMatcher
 from typing import Any
 
+from ..agent.handlers import is_low_risk_explicit_device_request, normalize_home_command
 from ..core.config import Settings
 
 ASSISTANT_INSTRUCTIONS = """请使用自然、简洁、温暖的中文回答，通常不超过三句话；用户要求时可展开。
@@ -335,144 +336,10 @@ ACOUSTIC_RELAY_INSTRUCTIONS = """
 """
 
 
-_RELAY_ACTION_MARKERS = (
-    "播放",
-    "来一首",
-    "放一首",
-    "听",
-    "打开",
-    "开启",
-    "关掉",
-    "关闭",
-    "调到",
-    "调成",
-    "设为",
-    "设置为",
-    "升高",
-    "降低",
-    "调高",
-    "调低",
-    "调亮",
-    "调暗",
-    "调大",
-    "调小",
-    "提高",
-    "减小",
-    "启动",
-    "停止",
-    "暂停",
-    "继续",
-    "切换到",
-    "换到",
-    "拉开",
-    "拉上",
-    "合上",
-    "亮一点",
-    "暗一点",
-    "开始清扫",
-    "开始扫地",
-    "清扫",
-    "回充",
-    "开",
-    "关",
-)
-_RELAY_DEVICE_MARKERS = (
-    "音乐播放器",
-    "轻音乐",
-    "音乐",
-    "歌曲",
-    "灯",
-    "照明",
-    "空调",
-    "新风",
-    "窗帘",
-    "纱帘",
-    "百叶帘",
-    "电视",
-    "投影仪",
-    "投影机",
-    "风扇",
-    "空气净化器",
-    "净化器",
-    "加湿器",
-    "除湿机",
-    "扫地机器人",
-    "扫地机",
-    "智能插座",
-    "普通插座",
-)
-_RELAY_NEGATION_MARKERS = ("不要", "别", "不用", "取消", "不需要")
-_RELAY_DISCUSSION_MARKERS = (
-    "我刚才说",
-    "刚才说了",
-    "比如",
-    "例如",
-    "举例",
-    "怎么打开",
-    "怎么关闭",
-    "怎么开",
-    "怎么关",
-    "如何打开",
-    "如何关闭",
-    "如何开",
-    "如何关",
-    "什么意思",
-    "方法",
-    "教程",
-    "耗电",
-    "原理",
-    "区别",
-    "帮我看看",
-    "看一下",
-    "检查一下",
-    "确认一下",
-    "开了吗",
-    "关了吗",
-    "开着",
-    "关着",
-    "设备状态",
-)
-_RELAY_REQUEST_MARKERS = ("帮我", "请", "麻烦", "给我", "我要", "我想")
-_RELAY_QUESTION_MARKERS = ("吗", "呢", "为什么", "怎样", "是否", "会不会", "能不能", "可不可以")
-_RELAY_UNSAFE_MARKERS = (
-    "门锁",
-    "开锁",
-    "燃气",
-    "热水器",
-    "车库门",
-    "监控",
-    "撤防",
-    "报警器",
-    "摄像头",
-    "摄像机",
-    "电磁炉",
-    "燃气灶",
-    "烤箱",
-    "微波炉",
-    "电饭煲",
-    "取暖器",
-    "电热毯",
-)
-
-
 def should_start_acoustic_relay(transcript: str) -> bool:
     """Conservatively identify explicit, low-risk device control requests."""
     text = "".join(str(transcript or "").split())
-    if not text or any(marker in text for marker in _RELAY_NEGATION_MARKERS):
-        return False
-    if any(marker in text for marker in _RELAY_DISCUSSION_MARKERS):
-        return False
-    if any(marker in text for marker in _RELAY_UNSAFE_MARKERS):
-        return False
-    if "开关" in text and not any(marker in text for marker in ("打开", "开启", "关闭", "关掉")):
-        return False
-    if any(marker in text for marker in _RELAY_QUESTION_MARKERS) and not any(
-        marker in text for marker in _RELAY_REQUEST_MARKERS
-    ):
-        return False
-    return any(marker in text for marker in _RELAY_ACTION_MARKERS) and any(
-        marker in text for marker in _RELAY_DEVICE_MARKERS
-    )
+    return is_low_risk_explicit_device_request(text)
 
 
 def extract_home_control_command(transcript: str) -> str:
@@ -485,26 +352,7 @@ def extract_home_control_command(transcript: str) -> str:
     raw = str(transcript or "").strip()
     if not should_start_acoustic_relay(raw):
         return ""
-    command = "".join(raw.split())
-    # 用户常说“打开天猫精灵，让天猫精灵开灯”。前半句是调用方式，
-    # 不是应交给 Genie 的设备命令；选择最后一段真正含设备和动作的短句。
-    candidates = [
-        part
-        for part in re.split(r"[，,。.!！?？;；：:、]+", command)
-        if any(marker in part for marker in _RELAY_ACTION_MARKERS)
-        and any(marker in part for marker in _RELAY_DEVICE_MARKERS)
-    ]
-    if candidates:
-        command = candidates[-1]
-    command = re.sub(r"^(?:天猫管家|天猫智家|智能管家|曼巴管家|管家)[，,：:、]?", "", command)
-    command = re.sub(r"^(?:请|麻烦|劳驾)", "", command)
-    command = re.sub(r"^(?:帮我|给我|替我)", "", command)
-    command = re.sub(r"^(?:让|叫|请)?天猫精灵(?:帮我|给我|替我)?", "", command)
-    command = re.sub(r"^(?:请|麻烦|劳驾|帮我|给我|替我)", "", command)
-    command = command.strip("，,。.!！?？;；：:、 ")
-    if not command or len(command) > 120:
-        return ""
-    return command
+    return normalize_home_command(raw)
 
 
 def build_session_update(

@@ -5,26 +5,17 @@ import logging
 import random
 import re
 import uuid
+from collections.abc import Mapping
 from datetime import datetime
 from typing import Any, Literal, TypedDict, cast
 from zoneinfo import ZoneInfo
 
 import httpx
-from langgraph.graph import END, START, StateGraph
 from pydantic import ValidationError
 
 from ..core.config import Settings
 from .handlers import (
-    ACTION_WORDS as _ACTION_WORDS,
-)
-from .handlers import (
     DEVICE_ALIASES as _DEVICE_ALIASES,
-)
-from .handlers import (
-    HEALTH_ALERTS as _HEALTH_ALERTS,
-)
-from .handlers import (
-    NEGATED_FEELINGS as _NEGATED_FEELINGS,
 )
 from .handlers import (
     RELAXATION_DEVICES as _RELAXATION_DEVICES,
@@ -37,11 +28,12 @@ from .handlers import (
 )
 from .handlers import (
     IntentContext,
+    IntentEntrypoint,
     IntentHandler,
     IntentHandlerRegistry,
+    canonical_device,
     default_intent_handlers,
-    find_comfort_intent,
-    find_wellbeing_scenario,
+    normalize_home_command,
 )
 from .prompts import (
     HOUSEHOLD_AGENT_PROMPT,
@@ -117,39 +109,6 @@ class HouseholdAgentService:
             redis_password=settings.agent_state_redis_password,
             redis_db=settings.agent_state_redis_db,
         )
-        graph = StateGraph(AgentState)
-        graph.add_node("analyze", self._analyze)
-        graph.add_node("blocked", self._blocked)
-        graph.add_node("clarify", self._clarify)
-        graph.add_node("not_applicable", self._not_applicable)
-        graph.add_node("direct_plan", self._direct_plan)
-        graph.add_node("context_plan", self._context_plan)
-        graph.add_node("wellbeing", self._wellbeing_advice)
-        graph.add_node("health_notice", self._health_notice)
-        graph.add_node("validate", self._validate)
-        graph.add_edge(START, "analyze")
-        graph.add_conditional_edges(
-            "analyze",
-            lambda state: state["route"],
-            {
-                "blocked": "blocked",
-                "clarify": "clarify",
-                "not_applicable": "not_applicable",
-                "direct": "direct_plan",
-                "contextual": "context_plan",
-                "wellbeing": "wellbeing",
-                "health_notice": "health_notice",
-            },
-        )
-        graph.add_edge("blocked", END)
-        graph.add_edge("clarify", END)
-        graph.add_edge("not_applicable", END)
-        graph.add_edge("direct_plan", "validate")
-        graph.add_edge("context_plan", "validate")
-        graph.add_edge("wellbeing", END)
-        graph.add_edge("health_notice", END)
-        graph.add_edge("validate", END)
-        self._graph = graph.compile()
 
     async def start(self) -> None:
         if not self.enabled:
@@ -172,8 +131,9 @@ class HouseholdAgentService:
         )
         self.ready = bool(self.settings.dashscope_api_key)
         logger.info(
-            "household agent ready: model=%s location=%s weather=%s simulated_environment=%s state_backend=%s",
+            "household agent ready: model=%s thinking=%s location=%s weather=%s simulated_environment=%s state_backend=%s",
             self.settings.agent_model,
+            "enabled" if self.settings.agent_enable_thinking else "disabled",
             self.settings.agent_location_name,
             self.settings.agent_weather_enabled,
             self.settings.agent_simulated_environment_enabled,
@@ -188,9 +148,60 @@ class HouseholdAgentService:
         self._client = None
         self._data_tools = None
 
+    def _build_planner_payload(
+        self,
+        *,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        tool_choice: str | dict[str, Any],
+        temperature: float,
+        max_tokens: int,
+    ) -> dict[str, Any]:
+        """Build every Agent request from one model policy to prevent branch drift."""
+        return {
+            "model": self.settings.agent_model,
+            "messages": messages,
+            "tools": tools,
+            "tool_choice": tool_choice,
+            "enable_thinking": self.settings.agent_enable_thinking,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+
+    async def _request_planner_message(
+        self,
+        *,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        tool_choice: str | dict[str, Any],
+        temperature: float,
+        max_tokens: int,
+    ) -> dict[str, Any]:
+        if self._client is None:
+            raise RuntimeError("planner client is not started")
+        response = await self._client.post(
+            self.settings.agent_api_url,
+            json=self._build_planner_payload(
+                messages=messages,
+                tools=tools,
+                tool_choice=tool_choice,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            ),
+            timeout=self.settings.agent_timeout_seconds,
+        )
+        response.raise_for_status()
+        message = response.json()["choices"][0]["message"]
+        if not isinstance(message, dict):
+            raise TypeError("planner response message must be an object")
+        return cast(dict[str, Any], message)
+
     def might_be_home_request(self, transcript: str) -> bool:
+        return self.classify_entrypoint(transcript).accepted
+
+    def classify_entrypoint(self, transcript: str) -> IntentEntrypoint:
         text = "".join(str(transcript or "").split())
-        return self._intent_handlers.accepts_as_entrypoint(
+        return self._intent_handlers.classify(
             IntentContext(text=text, default_room=self.settings.agent_default_room)
         )
 
@@ -203,22 +214,16 @@ class HouseholdAgentService:
 
     def might_be_wellbeing_request(self, transcript: str) -> bool:
         """Return true for recognized human-state scenarios, including urgent notices."""
-        text = "".join(str(transcript or "").split())
-        if any(marker in text for marker in _HEALTH_ALERTS):
-            return True
-        return bool(self._wellbeing_scenario(text)) and not any(
-            marker in text for marker in _NEGATED_FEELINGS
+        entrypoint = self.classify_entrypoint(transcript)
+        route = str(entrypoint.analysis.get("route") or "")
+        return route in {"wellbeing", "health_notice"} or bool(
+            entrypoint.analysis.get("wellbeing_scenario")
         )
 
     def might_be_advice_only_request(self, transcript: str) -> bool:
         """Return true when the Agent can answer without a working device provider."""
-        text = "".join(str(transcript or "").split())
-        if any(marker in text for marker in _HEALTH_ALERTS):
-            return True
-        scenario = self._wellbeing_scenario(text)
-        return bool(scenario and scenario not in _RELAXATION_SCENARIOS) and not any(
-            marker in text for marker in _NEGATED_FEELINGS
-        )
+        entrypoint = self.classify_entrypoint(transcript)
+        return entrypoint.accepted and entrypoint.advice_only
 
     async def update_household_state(
         self, user_id: str, room: str, update: HouseholdStateUpdate
@@ -239,13 +244,36 @@ class HouseholdAgentService:
             "evidence": [],
             "used_function_calling": False,
         }
-        # LangGraph's compiled generic currently loses this concrete TypedDict
-        # at the ainvoke boundary; the graph itself was built from AgentState.
-        result = cast(
-            AgentState,
-            await self._graph.ainvoke(cast(Any, initial_state)),
-        )
-        return result["decision"]
+        initial_state = self._merge_state(initial_state, self._analyze(initial_state))
+        route = initial_state["route"]
+        if route == "blocked":
+            initial_state = self._merge_state(initial_state, self._blocked(initial_state))
+        elif route == "clarify":
+            initial_state = self._merge_state(initial_state, self._clarify(initial_state))
+        elif route == "not_applicable":
+            initial_state = self._merge_state(initial_state, self._not_applicable(initial_state))
+        elif route == "direct":
+            initial_state = self._merge_state(initial_state, self._direct_plan(initial_state))
+            initial_state = self._merge_state(initial_state, self._validate(initial_state))
+        elif route == "contextual":
+            initial_state = self._merge_state(
+                initial_state, await self._context_plan(initial_state)
+            )
+            initial_state = self._merge_state(initial_state, self._validate(initial_state))
+        elif route == "wellbeing":
+            initial_state = self._merge_state(
+                initial_state, await self._wellbeing_advice(initial_state)
+            )
+        elif route == "health_notice":
+            initial_state = self._merge_state(initial_state, self._health_notice(initial_state))
+        else:  # pragma: no cover - Literal route and registry are closed over this set.
+            raise RuntimeError(f"unsupported household-agent route: {route}")
+        return initial_state["decision"]
+
+    @staticmethod
+    def _merge_state(state: AgentState, changes: Mapping[str, Any]) -> AgentState:
+        """Return a new typed state after applying one route node's changes."""
+        return cast(AgentState, {**state, **changes})
 
     def _now(self) -> datetime:
         try:
@@ -282,14 +310,6 @@ class HouseholdAgentService:
         return self._intent_handlers.resolve(
             IntentContext(text=text, default_room=self.settings.agent_default_room)
         )
-
-    @staticmethod
-    def _comfort_intent(text: str) -> str:
-        return find_comfort_intent(text)
-
-    @staticmethod
-    def _wellbeing_scenario(text: str) -> str:
-        return find_wellbeing_scenario(text)
 
     def _blocked(self, state: AgentState) -> dict[str, Any]:
         return {
@@ -335,7 +355,7 @@ class HouseholdAgentService:
 
     def _direct_plan(self, state: AgentState) -> dict[str, Any]:
         transcript = state["request"].transcript.strip()
-        command = self._normalize_command(transcript)
+        command = normalize_home_command(transcript)
         plan = ModelPlan(
             command=command,
             device=state["device"],
@@ -368,24 +388,15 @@ class HouseholdAgentService:
         used_function_calling = False
         try:
             for _ in range(self.settings.agent_max_tool_rounds):
-                payload = {
-                    "model": self.settings.agent_model,
-                    "messages": messages,
-                    "tools": self._tool_definitions(),
-                    "tool_choice": "auto",
-                    "enable_thinking": False,
-                    "temperature": (
+                message = await self._request_planner_message(
+                    messages=messages,
+                    tools=self._tool_definitions(),
+                    tool_choice="auto",
+                    temperature=(
                         0.35 if state.get("wellbeing_scenario") in _RELAXATION_SCENARIOS else 0.1
                     ),
-                    "max_tokens": 900,
-                }
-                response = await self._client.post(
-                    self.settings.agent_api_url,
-                    json=payload,
-                    timeout=self.settings.agent_timeout_seconds,
+                    max_tokens=900,
                 )
-                response.raise_for_status()
-                message = response.json()["choices"][0]["message"]
                 messages.append(message)
                 tool_calls = message.get("tool_calls") or []
                 if not tool_calls:
@@ -486,9 +497,8 @@ class HouseholdAgentService:
         used_function_calling = False
         if self.ready and self._client:
             try:
-                payload = {
-                    "model": self.settings.agent_model,
-                    "messages": [
+                message = await self._request_planner_message(
+                    messages=[
                         {"role": "system", "content": WELLBEING_ADVICE_PROMPT},
                         {
                             "role": "user",
@@ -501,22 +511,14 @@ class HouseholdAgentService:
                             ),
                         },
                     ],
-                    "tools": [self._wellbeing_tool_definition()],
-                    "tool_choice": {
+                    tools=[self._wellbeing_tool_definition()],
+                    tool_choice={
                         "type": "function",
                         "function": {"name": "submit_wellbeing_advice"},
                     },
-                    "enable_thinking": False,
-                    "temperature": 0.2,
-                    "max_tokens": 500,
-                }
-                response = await self._client.post(
-                    self.settings.agent_api_url,
-                    json=payload,
-                    timeout=self.settings.agent_timeout_seconds,
+                    temperature=0.2,
+                    max_tokens=500,
                 )
-                response.raise_for_status()
-                message = response.json()["choices"][0]["message"]
                 tool_call = next(
                     (
                         item
@@ -580,14 +582,7 @@ class HouseholdAgentService:
 
     def _validate(self, state: AgentState) -> dict[str, Any]:
         plan = state["model_plan"]
-        planned_device = next(
-            (
-                canonical
-                for alias, canonical in _DEVICE_ALIASES
-                if alias in plan.device or alias in plan.command
-            ),
-            "",
-        )
+        planned_device = canonical_device(plan.device) or canonical_device(plan.command)
         is_relaxation = state.get("wellbeing_scenario") in _RELAXATION_SCENARIOS
         effective_state: AgentState = state
         device = state.get("device", "")
@@ -601,14 +596,7 @@ class HouseholdAgentService:
                 plan = self._fallback_relaxation_plan(state, state.get("evidence", []))[
                     "model_plan"
                 ]
-                planned_device = next(
-                    (
-                        canonical
-                        for alias, canonical in _DEVICE_ALIASES
-                        if alias in plan.device or alias in plan.command
-                    ),
-                    "",
-                )
+                planned_device = canonical_device(plan.device) or canonical_device(plan.command)
             allowed_devices = set(state.get("allowed_devices") or _RELAXATION_DEVICES)
             if planned_device not in allowed_devices:
                 return {
@@ -654,7 +642,11 @@ class HouseholdAgentService:
                 self._extract_parameters(state["request"].transcript),
             )
         )
-        command = self._enforce_recommended_command(effective_state, plan.command, parameters)
+        command = self._build_command(
+            effective_state,
+            parameters,
+            fallback_command=plan.command,
+        )
         action = DeviceAction(
             command=command,
             device=device,
@@ -684,7 +676,6 @@ class HouseholdAgentService:
             return self._fallback_relaxation_plan(state, evidence)
         transcript = state["request"].transcript
         params = self._extract_parameters(transcript)
-        room_device = f"{state.get('room', '')}{state['device']}"
         rationale = "按用户明确要求执行。"
         if state["device"] == "空调" and "temperature_c" not in params:
             weather = next((item for item in evidence if item.kind == "weather"), None)
@@ -716,7 +707,7 @@ class HouseholdAgentService:
             params["brightness_percent"] = brightness
             source = "实时室内照度" if household and not household.simulated else "模拟室内照度"
             rationale = f"根据{source}，建议亮度为{brightness}%。"
-        command = self._command_from_parts(state, params, room_device)
+        command = self._build_command(state, params)
         user_message = self._contextual_user_message(state, evidence, params)
         return {
             "model_plan": ModelPlan(
@@ -791,8 +782,7 @@ class HouseholdAgentService:
             rationale = "结合当前室内温度，选择低风险的通风降温方案，并保留用户确认。"
         else:
             rationale = "当前更适合用舒缓音乐帮助放松，并同时建议短暂休息和补水。"
-        room_device = f"{effective_state.get('room', '')}{device}"
-        command = self._command_from_parts(effective_state, params, room_device)
+        command = self._build_command(effective_state, params)
         return {
             "model_plan": ModelPlan(
                 command=command,
@@ -858,9 +848,14 @@ class HouseholdAgentService:
             )
         return False
 
-    def _command_from_parts(
-        self, state: AgentState, params: dict[str, Any], room_device: str
+    def _build_command(
+        self,
+        state: AgentState,
+        params: dict[str, Any],
+        *,
+        fallback_command: str = "",
     ) -> str:
+        room_device = f"{state.get('room', '')}{state['device']}"
         action = state["action"]
         if state.get("device") == "音乐播放器" and action == "play":
             return "播放一首舒缓的轻音乐"
@@ -873,24 +868,7 @@ class HouseholdAgentService:
             return f"打开{room_device}并调到{params['brightness_percent']}%亮度"
         if state.get("comfort_intent") and action == "open":
             return f"打开{room_device}"
-        return self._normalize_command(state["request"].transcript)
-
-    def _enforce_recommended_command(
-        self, state: AgentState, command: str, params: dict[str, Any]
-    ) -> str:
-        room_device = f"{state.get('room', '')}{state['device']}"
-        if state.get("device") == "音乐播放器" and state.get("action") == "play":
-            return "播放一首舒缓的轻音乐"
-        if state["action"] == "close":
-            return f"关闭{room_device}"
-        if state["device"] == "空调" and "temperature_c" in params:
-            mode = f"{params['mode']}模式" if params.get("mode") else ""
-            return f"打开{room_device}并设置为{params['temperature_c']}度{mode}"
-        if state["device"] == "灯" and "brightness_percent" in params:
-            return f"打开{room_device}并调到{params['brightness_percent']}%亮度"
-        if state.get("comfort_intent") and state["action"] == "open":
-            return f"打开{room_device}"
-        return self._normalize_command(command)
+        return normalize_home_command(fallback_command or state["request"].transcript)
 
     def _extract_parameters(self, transcript: str) -> dict[str, Any]:
         params: dict[str, Any] = {}
@@ -1079,22 +1057,6 @@ class HouseholdAgentService:
             return f"{room}空气质量不佳，建议开启空气净化器。"
         household_summary = household.summary if household else "当前家庭状态暂以可用信息为准"
         return f"{household_summary}；建议执行：{state['request'].transcript}。"
-
-    def _normalize_command(self, transcript: str) -> str:
-        command = "".join(str(transcript or "").split())
-        candidates = [
-            part
-            for part in re.split(r"[，,。.!！?？;；：:、]+", command)
-            if any(alias in part for alias, _ in _DEVICE_ALIASES)
-            and any(action in part for action in _ACTION_WORDS)
-        ]
-        if candidates:
-            command = candidates[-1]
-        command = re.sub(r"^(?:天猫管家|天猫智家|智能管家|曼巴管家|管家)[，,：:、]?", "", command)
-        command = re.sub(r"^(?:请|麻烦|劳驾|帮我|给我|替我)", "", command)
-        command = re.sub(r"^(?:让|叫|请)?天猫精灵(?:帮我|给我|替我)?", "", command)
-        command = re.sub(r"^(?:请|麻烦|劳驾|帮我|给我|替我)", "", command)
-        return command.strip("，,。.!！?？;；：:、 ")[:120]
 
     def _replace_evidence(self, items: list[Evidence], item: Evidence) -> list[Evidence]:
         return [existing for existing in items if existing.kind != item.kind] + [item]

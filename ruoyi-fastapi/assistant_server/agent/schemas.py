@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
-class RiskLevel(str, Enum):
+class RiskLevel(StrEnum):
     L0 = "L0"
     L1 = "L1"
     L2 = "L2"
@@ -15,7 +15,7 @@ class RiskLevel(str, Enum):
     L4 = "L4"
 
 
-class ActionLevel(str, Enum):
+class ActionLevel(StrEnum):
     A0 = "A0"
     A1 = "A1"
     A2 = "A2"
@@ -23,7 +23,7 @@ class ActionLevel(str, Enum):
     A4 = "A4"
 
 
-class DecisionStatus(str, Enum):
+class DecisionStatus(StrEnum):
     EXECUTE = "execute"
     ADVISE = "advise"
     CLARIFY = "clarify"

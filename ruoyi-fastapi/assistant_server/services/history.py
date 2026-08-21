@@ -58,7 +58,7 @@ class VoiceHistoryStore:
             logger.info("voice history persistence disabled")
             return
         try:
-            import aiomysql
+            import aiomysql  # type: ignore[import-untyped]
         except ImportError as exc:
             raise RuntimeError(
                 "已启用数据库持久化，但缺少 aiomysql；请执行 pip install -r requirements.txt"

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
@@ -66,6 +67,8 @@ UNSAFE_MARKERS = (
     "报警器",
     "电热毯",
     "取暖器",
+    "摄像机",
+    "电饭煲",
 )
 NEGATIONS = ("不要", "别", "不用", "取消", "不需要")
 DISCUSSION_MARKERS = (
@@ -89,6 +92,12 @@ DISCUSSION_MARKERS = (
     "例如",
     "能不能控制",
     "可不可以控制",
+    "什么意思",
+    "耗电",
+    "帮我看看",
+    "看一下",
+    "检查一下",
+    "确认一下",
 )
 ACTION_WORDS = (
     "播放",
@@ -101,6 +110,8 @@ ACTION_WORDS = (
     "关闭",
     "关掉",
     "停止",
+    "暂停",
+    "继续",
     "调到",
     "调成",
     "设为",
@@ -116,11 +127,14 @@ ACTION_WORDS = (
     "提高",
     "减小",
     "切换",
+    "换到",
     "拉开",
     "拉上",
     "合上",
     "清扫",
     "扫地",
+    "开始清扫",
+    "开始扫地",
     "回充",
     "开",
     "关",
@@ -217,25 +231,71 @@ def find_wellbeing_scenario(text: str) -> str:
     return ""
 
 
-def _room(text: str, fallback: str = "") -> str:
+def find_room(text: str, fallback: str = "") -> str:
     return next((name for name in ROOMS if name in text), fallback)
 
 
-def _device(text: str) -> str:
+def canonical_device(text: str) -> str:
     return next(
         (canonical for alias, canonical in DEVICE_ALIASES if alias in text),
         "",
     )
 
 
-def _is_explicit_device_request(text: str) -> bool:
-    has_device = bool(_device(text)) or any(marker in text for marker in UNSAFE_MARKERS)
+def normalize_home_command(transcript: str) -> str:
+    """Return the final explicit device clause as a compact audit label."""
+    command = "".join(str(transcript or "").split())
+    candidates = [
+        part
+        for part in re.split(r"[，,。.!！?？;；：:、]+", command)
+        if any(alias in part for alias, _canonical in DEVICE_ALIASES)
+        and any(action in part for action in ACTION_WORDS)
+    ]
+    if candidates:
+        command = candidates[-1]
+    command = re.sub(
+        r"^(?:天猫管家|天猫智家|智能管家|曼巴管家|管家)[，,：:、]?",
+        "",
+        command,
+    )
+    command = re.sub(r"^(?:请|麻烦|劳驾|帮我|给我|替我)", "", command)
+    command = re.sub(r"^(?:让|叫|请)?天猫精灵(?:帮我|给我|替我)?", "", command)
+    command = re.sub(r"^(?:请|麻烦|劳驾|帮我|给我|替我)", "", command)
+    return command.strip("，,。.!！?？;；：:、 ")[:120]
+
+
+def is_explicit_device_request(text: str) -> bool:
+    has_device = bool(canonical_device(text)) or any(marker in text for marker in UNSAFE_MARKERS)
     has_action = any(marker in text for marker in ACTION_WORDS)
     if not text or not has_device or not has_action:
         return False
     if any(marker in text for marker in NEGATIONS):
         return False
-    return not any(marker in text for marker in DISCUSSION_MARKERS)
+    if any(marker in text for marker in DISCUSSION_MARKERS):
+        return False
+    if "开关" in text and not any(word in text for word in ("打开", "开启", "关闭", "关掉")):
+        return False
+    question_markers = ("吗", "呢", "为什么", "怎样", "是否", "会不会", "能不能", "可不可以")
+    request_markers = ("帮我", "请", "麻烦", "给我", "我要", "我想")
+    return not (
+        any(marker in text for marker in question_markers)
+        and not any(marker in text for marker in request_markers)
+    )
+
+
+def is_low_risk_explicit_device_request(text: str) -> bool:
+    """Return true only when an explicit command is safe for direct forwarding."""
+    return is_explicit_device_request(text) and not any(marker in text for marker in UNSAFE_MARKERS)
+
+
+def is_ambiguous_toggle_request(text: str) -> bool:
+    """Return true for commands that name a device but not the final power state."""
+    return (
+        bool(canonical_device(text))
+        and "开关" in text
+        and not any(word in text for word in ("打开", "开启", "关闭", "关掉"))
+        and not any(marker in text for marker in NEGATIONS)
+    )
 
 
 @dataclass(frozen=True)
@@ -244,9 +304,26 @@ class IntentContext:
     default_room: str
 
 
+@dataclass(frozen=True)
+class IntentEntrypoint:
+    """One registry decision reused by planning and provider gating."""
+
+    accepted: bool
+    handler_name: str
+    analysis: dict[str, Any]
+    requires_provider: bool = False
+
+    @property
+    def advice_only(self) -> bool:
+        return not self.requires_provider
+
+    def can_dispatch(self, *, genie_provider_available: bool) -> bool:
+        return self.accepted and (self.advice_only or genie_provider_available)
+
+
 @runtime_checkable
 class IntentHandler(Protocol):
-    """Small, ordered intent plug-in used before the fixed LangGraph planner."""
+    """Small, ordered intent plug-in used by the explicit route dispatcher."""
 
     name: str
     priority: int
@@ -283,14 +360,28 @@ class IntentHandlerRegistry:
         items.append(handler)
         self._handlers = tuple(sorted(items, key=lambda item: (-int(item.priority), item.name)))
 
-    def resolve(self, context: IntentContext) -> dict[str, Any]:
+    @staticmethod
+    def _requires_provider(analysis: dict[str, Any]) -> bool:
+        route = str(analysis.get("route") or "")
+        return route in {"direct", "contextual"}
+
+    def classify(self, context: IntentContext) -> IntentEntrypoint:
         for handler in self._handlers:
             if handler.matches(context):
-                return handler.analyze(context)
+                analysis = handler.analyze(context)
+                return IntentEntrypoint(
+                    accepted=handler.accepts_as_entrypoint(context),
+                    handler_name=handler.name,
+                    analysis=analysis,
+                    requires_provider=self._requires_provider(analysis),
+                )
         raise RuntimeError("intent registry has no fallback handler")
 
+    def resolve(self, context: IntentContext) -> dict[str, Any]:
+        return self.classify(context).analysis
+
     def accepts_as_entrypoint(self, context: IntentContext) -> bool:
-        return any(handler.accepts_as_entrypoint(context) for handler in self._handlers)
+        return self.classify(context).accepted
 
     def catalog(self) -> list[dict[str, Any]]:
         return [
@@ -321,10 +412,12 @@ class UnsafeDeviceIntentHandler:
     priority = 900
 
     def matches(self, context: IntentContext) -> bool:
-        return any(marker in context.text for marker in UNSAFE_MARKERS)
+        return any(
+            marker in context.text for marker in UNSAFE_MARKERS
+        ) and is_explicit_device_request(context.text)
 
     def accepts_as_entrypoint(self, context: IntentContext) -> bool:
-        return self.matches(context) and _is_explicit_device_request(context.text)
+        return self.matches(context)
 
     def analyze(self, context: IntentContext) -> dict[str, Any]:
         return {"route": "blocked", "risk_level": RiskLevel.L4}
@@ -335,18 +428,18 @@ class RelaxationIntentHandler:
     priority = 800
 
     def matches(self, context: IntentContext) -> bool:
-        return find_wellbeing_scenario(context.text) in RELAXATION_SCENARIOS
-
-    def accepts_as_entrypoint(self, context: IntentContext) -> bool:
-        return self.matches(context) and not any(
+        return find_wellbeing_scenario(context.text) in RELAXATION_SCENARIOS and not any(
             marker in context.text for marker in NEGATED_FEELINGS
         )
+
+    def accepts_as_entrypoint(self, context: IntentContext) -> bool:
+        return self.matches(context)
 
     def analyze(self, context: IntentContext) -> dict[str, Any]:
         return {
             "route": "contextual",
             "device": "",
-            "room": _room(context.text, context.default_room),
+            "room": find_room(context.text, context.default_room),
             "action": "recommend",
             "risk_level": RiskLevel.L2,
             "needs_context": True,
@@ -361,14 +454,14 @@ class ComfortIntentHandler:
     priority = 700
 
     def matches(self, context: IntentContext) -> bool:
-        return bool(find_comfort_intent(context.text))
-
-    def accepts_as_entrypoint(self, context: IntentContext) -> bool:
         return (
-            self.matches(context)
+            bool(find_comfort_intent(context.text))
             and not any(marker in context.text for marker in NEGATIONS + NEGATED_FEELINGS)
             and not any(marker in context.text for marker in DISCUSSION_MARKERS)
         )
+
+    def accepts_as_entrypoint(self, context: IntentContext) -> bool:
+        return self.matches(context)
 
     def analyze(self, context: IntentContext) -> dict[str, Any]:
         comfort_intent = find_comfort_intent(context.text)
@@ -378,7 +471,7 @@ class ComfortIntentHandler:
         return {
             "route": "contextual",
             "device": device,
-            "room": _room(context.text, context.default_room),
+            "room": find_room(context.text, context.default_room),
             "action": "set" if device in {"空调", "灯"} else "open",
             "risk_level": RiskLevel.L2 if device == "空调" else RiskLevel.L1,
             "needs_context": True,
@@ -391,12 +484,12 @@ class WellbeingIntentHandler:
     priority = 600
 
     def matches(self, context: IntentContext) -> bool:
-        return bool(find_wellbeing_scenario(context.text))
-
-    def accepts_as_entrypoint(self, context: IntentContext) -> bool:
-        return self.matches(context) and not any(
+        return bool(find_wellbeing_scenario(context.text)) and not any(
             marker in context.text for marker in NEGATED_FEELINGS
         )
+
+    def accepts_as_entrypoint(self, context: IntentContext) -> bool:
+        return self.matches(context)
 
     def analyze(self, context: IntentContext) -> dict[str, Any]:
         return {
@@ -404,7 +497,7 @@ class WellbeingIntentHandler:
             "risk_level": RiskLevel.L0,
             "needs_context": True,
             "wellbeing_scenario": find_wellbeing_scenario(context.text),
-            "room": _room(context.text, context.default_room),
+            "room": find_room(context.text, context.default_room),
         }
 
 
@@ -413,15 +506,17 @@ class DeviceControlIntentHandler:
     priority = 500
 
     def matches(self, context: IntentContext) -> bool:
-        return bool(_device(context.text)) and _is_explicit_device_request(context.text)
+        return bool(canonical_device(context.text)) and (
+            is_explicit_device_request(context.text) or is_ambiguous_toggle_request(context.text)
+        )
 
     def accepts_as_entrypoint(self, context: IntentContext) -> bool:
         return self.matches(context)
 
     def analyze(self, context: IntentContext) -> dict[str, Any]:
         text = context.text
-        device = _device(text)
-        room = _room(text)
+        device = canonical_device(text)
+        room = find_room(text)
         if "开关" in text and not any(word in text for word in ("打开", "开启", "关闭", "关掉")):
             return {"route": "clarify", "device": device, "room": room}
         if any(word in text for word in ("关闭", "关掉", "停止")):
@@ -441,13 +536,14 @@ class DeviceControlIntentHandler:
             action = "open"
         else:
             action = "set"
+        needs_context = action == "open" and device in {"空调", "灯"}
         return {
-            "route": "contextual",
+            "route": "contextual" if needs_context else "direct",
             "device": device,
             "room": room,
             "action": action,
             "risk_level": RiskLevel.L2 if device == "空调" else RiskLevel.L1,
-            "needs_context": True,
+            "needs_context": needs_context,
         }
 
 
@@ -462,7 +558,7 @@ class NotApplicableIntentHandler:
         return False
 
     def analyze(self, context: IntentContext) -> dict[str, Any]:
-        return {"route": "not_applicable", "device": _device(context.text)}
+        return {"route": "not_applicable", "device": canonical_device(context.text)}
 
 
 def default_intent_handlers() -> tuple[IntentHandler, ...]:

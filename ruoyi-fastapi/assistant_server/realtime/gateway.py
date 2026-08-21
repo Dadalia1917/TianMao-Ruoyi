@@ -669,7 +669,7 @@ class RealtimeProxy:
                                 ),
                                 name=f"home-agent-replan-{stats.session_id[:8]}",
                             )
-                    elif self.agent.might_be_home_request(content):
+                    elif self.agent.classify_entrypoint(content).accepted:
                         wake_state.pending_home_action = None
                         if wake_state.home_plan_in_progress:
                             wake_state.pending_home_action = action
@@ -702,16 +702,16 @@ class RealtimeProxy:
                     continue
 
                 home_command = extract_home_control_command(content)
-                is_home_request = self.agent.might_be_home_request(content)
-                is_advice_only_request = self.agent.might_be_advice_only_request(content)
+                agent_entrypoint = self.agent.classify_entrypoint(content)
                 home_key = (qwen_item_id, content)
                 if (
                     wake_state.mode == "awake"
-                    and is_home_request
+                    and agent_entrypoint.accepted
                     and home_key not in seen_home_commands
-                    and (
-                        is_advice_only_request
-                        or (self.settings.genie_provider_enabled and genie_provider_available)
+                    and agent_entrypoint.can_dispatch(
+                        genie_provider_available=(
+                            self.settings.genie_provider_enabled and genie_provider_available
+                        )
                     )
                 ):
                     seen_home_commands.add(home_key)

@@ -5,6 +5,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+RECOMMENDED_AGENT_MODEL = "qwen3.8-max"
+SUPPORTED_AGENT_MODELS = frozenset({RECOMMENDED_AGENT_MODEL})
+
 
 def load_local_env(path: Path) -> None:
     """Load a small .env file without adding another runtime dependency."""
@@ -103,6 +106,7 @@ class Settings:
     agent_enabled: bool
     agent_api_url: str
     agent_model: str
+    agent_enable_thinking: bool
     agent_timeout_seconds: int
     agent_max_tool_rounds: int
     agent_location_name: str
@@ -202,8 +206,9 @@ class Settings:
                 "AGENT_API_URL",
                 "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
             ).strip(),
-            agent_model=os.getenv("AGENT_MODEL", "qwen3.8-max").strip(),
-            agent_timeout_seconds=_as_int("AGENT_TIMEOUT_SECONDS", 15, 3),
+            agent_model=os.getenv("AGENT_MODEL", RECOMMENDED_AGENT_MODEL).strip(),
+            agent_enable_thinking=_as_bool("AGENT_ENABLE_THINKING", True),
+            agent_timeout_seconds=_as_int("AGENT_TIMEOUT_SECONDS", 30, 3),
             agent_max_tool_rounds=_as_int("AGENT_MAX_TOOL_ROUNDS", 3, 1),
             agent_location_name=os.getenv("AGENT_LOCATION_NAME", "无锡").strip() or "无锡",
             agent_latitude=_as_float("AGENT_LATITUDE", 31.4912),
@@ -264,6 +269,8 @@ class Settings:
             errors.append("AGENT_API_URL 必须是 http:// 或 https:// 地址")
         if self.agent_enabled and not self.agent_model:
             errors.append("AGENT_MODEL 不能为空")
+        if self.agent_enabled and self.agent_model not in SUPPORTED_AGENT_MODELS:
+            errors.append("AGENT_MODEL 当前仅支持 qwen3.8-max")
         if not -90 <= self.agent_latitude <= 90:
             errors.append("AGENT_LATITUDE 必须在 -90 到 90 之间")
         if not -180 <= self.agent_longitude <= 180:

@@ -10,7 +10,7 @@
 
 完整的软件说明、技术栈、UML、ER 图、接口总表和部署指南请阅读仓库根目录 `README.md`。
 
-当前版本负责已登录用户的实时语音对话、六模型文字对话、自动续接、账号长期记忆和智能家居 Agent。v1.2.0 保留 v1.1.2 已验收的 LangGraph 单总控、`qwen3.8-max` Function Calling、确定性安全策略与环境工具，把低风险计划转换为待确认事件；疲劳、压力和想放松先建议休息、补水，再按室内状态、室外天气和同账号最近一次建议，从当前合理的空调、风扇、音乐播放器中做轻度随机选择，连续提出同类感受时会在安全可行的候选中避开上一设备。用户可自然同意、拒绝、追加动作、换方案、发起新请求、重新唤醒或结束对话；“并且/顺带/另外再”以及没有替换词的设备补充都保留原方案，例如“可以帮我播放音乐，并且帮我打开空调”会保留音乐并提取空调为追加动作；只有“改成/换成/只要/不需要原方案而是……”才替换，单独说“不需要”取消本轮。最终确认后以有序 `commands` 数组交给 T10S Android，由 Android 先执行普通家电、最后执行音乐并校验播放状态，避免后续天猫对话抢占音乐焦点。Home Assistant 当前未接入且不是控制前置条件；未来的传感器或网关只作为可选状态来源。
+当前版本负责已登录用户的实时语音对话、六模型文字对话、自动续接、账号长期记忆和智能家居 Agent。v1.2.0 使用显式单总控路由、`qwen3.8-max` Function Calling、确定性安全策略与环境工具，把低风险计划转换为待确认事件；疲劳、压力和想放松先建议休息、补水，再按室内状态、室外天气和同账号最近一次建议，从当前合理的空调、风扇、音乐播放器中做轻度随机选择，连续提出同类感受时会在安全可行的候选中避开上一设备。用户可自然同意、拒绝、追加动作、换方案、发起新请求、重新唤醒或结束对话；“并且/顺带/另外再”以及没有替换词的设备补充都保留原方案，例如“可以帮我播放音乐，并且帮我打开空调”会保留音乐并提取空调为追加动作；只有“改成/换成/只要/不需要原方案而是……”才替换，单独说“不需要”取消本轮。最终确认后以有序 `commands` 数组交给 T10S Android，由 Android 先执行普通家电、最后执行音乐并校验播放状态，避免后续天猫对话抢占音乐焦点。Home Assistant 当前未接入且不是控制前置条件；未来的传感器或网关只作为可选状态来源。
 
 ## 一键启动
 
@@ -80,7 +80,7 @@ ruoyi-fastapi/
 │  │  ├─ home_actions.py          # 家居规划、确认与回执协调
 │  │  ├─ contracts.py             # 网关依赖接口
 │  │  └─ gateway.py               # 上下游实时会话编排
-│  └─ agent/                       # LangGraph Agent、策略、状态与工具
+│  └─ agent/                       # 显式路由 Agent、策略、状态与工具
 └─ tests/
 ```
 
@@ -180,8 +180,9 @@ python -m mypy assistant_server --ignore-missing-imports --check-untyped-defs
 - `TEXT_MODEL_*`：六种文字模型的真实模型 ID。
 - `TEXT_MAX_CONNECTIONS` / `TEXT_MAX_CONNECTIONS_PER_USER`：文字请求并发上限。
 - `AGENT_ENABLED`：智能家居 Agent 总开关，默认开启。
-- `AGENT_MODEL` / `AGENT_API_URL`：用于 Function Calling 的百炼模型与兼容接口。
-- `AGENT_TIMEOUT_SECONDS` / `AGENT_MAX_TOOL_ROUNDS`：单次规划超时与最大工具轮数；限制 ReAct 循环，避免语音链路久等。
+- `AGENT_MODEL` / `AGENT_API_URL`：家居 Agent 当前只允许 `qwen3.8-max` 与百炼兼容接口。
+- `AGENT_ENABLE_THINKING`：家居 Agent 是否启用思考模式，当前默认 `true`。
+- `AGENT_TIMEOUT_SECONDS` / `AGENT_MAX_TOOL_ROUNDS`：单次规划超时（默认 30 秒）与最大工具轮数；限制工具循环，避免语音链路无限等待。
 - `AGENT_LOCATION_NAME` / `AGENT_LATITUDE` / `AGENT_LONGITUDE` / `AGENT_TIMEZONE`：天气工具所在地配置。
 - `AGENT_WEATHER_ENABLED`：空调建议是否读取实时天气。
 - `AGENT_SIMULATED_ENVIRONMENT_ENABLED`：灯光是否使用明确标记为“模拟”的室内照度；接入真实传感器后应关闭。
@@ -206,12 +207,12 @@ APP 的可回看历史默认保存在设备本地并按 RuoYi 用户 ID 分区�
 
 ## 智能家居 Agent
 
-v1.2.0 继续把 Agent 作为 FastAPI 内部独立模块，代码位于 `assistant_server/agent/`。意图入口位于 `handlers.py`，由 `IntentHandlerRegistry` 按优先级选择健康风险、禁用设备、放松、舒适、身心状态、明确设备控制或兜底 Handler；LangGraph 总控图继续负责规划、环境取证与最终校验，规划模型固定为 `qwen3.8-max`，普通语音仍由 Qwen3.5 Omni 实时处理。新增情境可实现 `IntentHandler` 并调用 `register_intent_handler()` 注册，无需修改 `_analyze` 条件链；当前 Handler 名称和优先级通过 `/api/v1/agent/capabilities` 返回。
+v1.2.0 继续把 Agent 作为 FastAPI 内部独立模块，代码位于 `assistant_server/agent/`。意图入口位于 `handlers.py`，由 `IntentHandlerRegistry` 按优先级选择健康风险、禁用设备、放松、舒适、身心状态、明确设备控制或兜底 Handler；显式分派器负责规划、环境取证与最终校验。家居建议与 Agent 规划只使用开启 thinking 的 `qwen3.8-max`，不配置其他 Agent 回退模型；普通语音仍由 Qwen3.5 Omni 实时处理。新增情境可实现 `IntentHandler` 并调用 `register_intent_handler()` 注册，无需修改 `_analyze` 条件链；当前 Handler 名称和优先级通过 `/api/v1/agent/capabilities` 返回。
 
 ```text
 Omni 最终转写
   -> IntentHandler 优先级注册表（普通聊天仍走实时直连）
-  -> LangGraph：分析 -> 风险/澄清/环境规划 -> 最终校验
+  -> 显式路由：分析 -> 风险/澄清/环境规划 -> 最终校验
   -> 天气工具或模拟照度工具
   -> Qwen3.8-Max Function Calling 提交严格 ModelPlan/WellbeingAdvice
   -> 播报家庭状态、依据、推荐参数和拟执行动作，进入待确认状态
@@ -233,4 +234,4 @@ Omni 最终转写
 - 模型输出必须通过 Pydantic 严格结构校验、设备一致性检查和温度/亮度范围裁剪。
 - 当前操作家电的正式方式就是 T10S 天猫精灵内部 `GenieApi` 文字指令，不依赖 Home Assistant。Provider 接收只能表示“天猫精灵已接受提交”，不能宣称客户端已经读取到灯或空调的物理状态。
 
-项目只直接依赖 `langgraph`，不需要安装完整 `langchain`；测试也使用 `asyncio.run()`，不要求 `pytest-asyncio`。Dify 可保留给未来运营人员配置知识库或非实时流程，不进入当前低延迟语音控制主链路。
+项目不依赖 `langgraph` 或完整 `langchain`；测试使用 `asyncio.run()`，不要求 `pytest-asyncio`。Dify 可保留给未来运营人员配置知识库或非实时流程，不进入当前低延迟语音控制主链路。

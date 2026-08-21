@@ -82,6 +82,24 @@ def build_agent(monkeypatch: pytest.MonkeyPatch) -> HouseholdAgentService:
     return agent
 
 
+def test_agent_planner_payload_uses_the_single_qwen_thinking_policy(monkeypatch):
+    monkeypatch.setenv("AGENT_MODEL", "qwen3.8-max")
+    monkeypatch.setenv("AGENT_ENABLE_THINKING", "true")
+    agent = build_agent(monkeypatch)
+
+    payload = agent._build_planner_payload(
+        messages=[{"role": "user", "content": "工作室有点闷"}],
+        tools=[],
+        tool_choice="auto",
+        temperature=0.1,
+        max_tokens=900,
+    )
+
+    assert payload["model"] == "qwen3.8-max"
+    assert payload["enable_thinking"] is True
+    assert payload["tool_choice"] == "auto"
+
+
 def run_plan(agent: HouseholdAgentService, request: AgentRequest):
     return asyncio.run(agent.plan(request))
 

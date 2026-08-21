@@ -1,4 +1,4 @@
-from assistant_server.core.config import Settings
+from assistant_server.core.config import RECOMMENDED_AGENT_MODEL, Settings
 
 
 def test_model_query_is_added(monkeypatch):
@@ -28,3 +28,19 @@ def test_empty_mysql_password_uses_team_default(monkeypatch):
     monkeypatch.setenv("MYSQL_PASSWORD", "")
 
     assert Settings.from_env().mysql_password == "123456"
+
+
+def test_agent_defaults_to_qwen38_with_thinking_enabled(monkeypatch):
+    monkeypatch.delenv("AGENT_MODEL", raising=False)
+    monkeypatch.delenv("AGENT_ENABLE_THINKING", raising=False)
+
+    settings = Settings.from_env()
+
+    assert settings.agent_model == RECOMMENDED_AGENT_MODEL == "qwen3.8-max"
+    assert settings.agent_enable_thinking is True
+
+
+def test_agent_rejects_unapproved_planner_models(monkeypatch):
+    monkeypatch.setenv("AGENT_MODEL", "deepseek-v4-pro")
+
+    assert "AGENT_MODEL 当前仅支持 qwen3.8-max" in Settings.from_env().validate()
