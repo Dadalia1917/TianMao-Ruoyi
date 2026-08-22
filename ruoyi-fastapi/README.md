@@ -10,7 +10,7 @@
 
 完整的软件说明、技术栈、UML、ER 图、接口总表和部署指南请阅读仓库根目录 `README.md`。
 
-当前版本负责已登录用户的实时语音对话、文字对话、自动续接、账号长期记忆和智能家居 Agent。v1.2.1 的家居建议和 Agent 规划只使用开启 thinking 的 `qwen3.8-max`，普通实时语音固定使用 `qwen3.5-omni-plus-realtime`，不为 Agent 启用其他模型或回退模型。单一意图入口统一处理设备控制、情境建议、确认/取消、追加/替换和安全阻断；“并且/顺带/另外”追加动作，“只要/改成/换成”替换旧方案，冲突动作在待确认前即被消解。最终确认后以有序 `commands` 数组交给 T10S Android，由 Android 先执行普通家电、最后执行音乐并校验播放状态。Home Assistant 当前未接入且不是控制前置条件；未来的传感器或网关只作为可选状态来源。
+当前版本负责已登录用户的实时语音对话、文字对话、自动续接、账号长期记忆和智能家居 Agent。v1.2.1 的家居建议和 Agent 规划固定使用关闭 thinking 的 `qwen3.8-max`，以降低家居操作等待时间；普通实时语音固定使用 `qwen3.5-omni-plus-realtime`，不为 Agent 启用其他模型或回退模型。单一意图入口统一处理设备控制、情境建议、确认/取消、追加/替换和安全阻断；“并且/顺带/另外”追加动作，“只要/改成/换成”替换旧方案，冲突动作在待确认前即被消解。最终确认后以有序 `commands` 数组交给 T10S Android，由 Android 先执行普通家电、最后执行音乐并校验播放状态。Home Assistant 当前未接入且不是控制前置条件；未来的传感器或网关只作为可选状态来源。
 
 ## 一键启动
 
@@ -181,7 +181,7 @@ python -m mypy assistant_server --ignore-missing-imports --check-untyped-defs
 - `TEXT_MAX_CONNECTIONS` / `TEXT_MAX_CONNECTIONS_PER_USER`：文字请求并发上限。
 - `AGENT_ENABLED`：智能家居 Agent 总开关，默认开启。
 - `AGENT_MODEL` / `AGENT_API_URL`：家居 Agent 当前只允许 `qwen3.8-max` 与百炼兼容接口。
-- `AGENT_ENABLE_THINKING`：家居 Agent 是否启用思考模式，当前默认 `true`。
+- `AGENT_ENABLE_THINKING`：家居 Agent 是否启用思考模式，当前默认 `false`，T10S 以低延迟为优先。
 - `AGENT_TIMEOUT_SECONDS` / `AGENT_MAX_TOOL_ROUNDS`：单次规划超时（默认 30 秒）与最大工具轮数；限制工具循环，避免语音链路无限等待。
 - `AGENT_LOCATION_NAME` / `AGENT_LATITUDE` / `AGENT_LONGITUDE` / `AGENT_TIMEZONE`：天气工具所在地配置。
 - `AGENT_WEATHER_ENABLED`：空调建议是否读取实时天气。
@@ -207,7 +207,7 @@ APP 的可回看历史默认保存在设备本地并按 RuoYi 用户 ID 分区�
 
 ## 智能家居 Agent
 
-v1.2.1 继续把 Agent 作为 FastAPI 内部独立模块，代码位于 `assistant_server/agent/`。单一意图入口统一分类健康风险、禁用设备、情境建议、明确设备控制、确认/取消、追加/替换和普通对话；显式分派器负责环境取证、规划、命令归一化、冲突消解与最终校验。家居建议与 Agent 规划只使用开启 thinking 的 `qwen3.8-max`，不配置其他 Agent 回退模型；普通语音仍由 Qwen3.5 Omni 实时处理。新增情境应扩展独立的意图/策略定义，不再增加平行的总控流程。
+v1.2.1 继续把 Agent 作为 FastAPI 内部独立模块，代码位于 `assistant_server/agent/`。单一意图入口统一分类健康风险、禁用设备、情境建议、明确设备控制、确认/取消、追加/替换和普通对话；显式分派器负责环境取证、规划、命令归一化、冲突消解与最终校验。家居建议与 Agent 规划只使用关闭 thinking 的 `qwen3.8-max`，不配置其他 Agent 回退模型；普通语音仍由 Qwen3.5 Omni 实时处理。新增情境应扩展独立的意图/策略定义，不再增加平行的总控流程。
 
 ```text
 Omni 最终转写

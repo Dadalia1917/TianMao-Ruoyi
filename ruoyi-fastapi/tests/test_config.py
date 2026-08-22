@@ -30,14 +30,14 @@ def test_empty_mysql_password_uses_team_default(monkeypatch):
     assert Settings.from_env().mysql_password == "123456"
 
 
-def test_agent_defaults_to_qwen38_with_thinking_enabled(monkeypatch):
+def test_agent_defaults_to_qwen38_with_thinking_disabled(monkeypatch):
     monkeypatch.delenv("AGENT_MODEL", raising=False)
     monkeypatch.delenv("AGENT_ENABLE_THINKING", raising=False)
 
     settings = Settings.from_env()
 
     assert settings.agent_model == RECOMMENDED_AGENT_MODEL == "qwen3.8-max"
-    assert settings.agent_enable_thinking is True
+    assert settings.agent_enable_thinking is False
 
 
 def test_agent_rejects_unapproved_planner_models(monkeypatch):

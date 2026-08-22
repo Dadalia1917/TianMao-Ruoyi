@@ -82,9 +82,9 @@ def build_agent(monkeypatch: pytest.MonkeyPatch) -> HouseholdAgentService:
     return agent
 
 
-def test_agent_planner_payload_uses_the_single_qwen_thinking_policy(monkeypatch):
+def test_agent_planner_payload_uses_qwen_without_thinking(monkeypatch):
     monkeypatch.setenv("AGENT_MODEL", "qwen3.8-max")
-    monkeypatch.setenv("AGENT_ENABLE_THINKING", "true")
+    monkeypatch.setenv("AGENT_ENABLE_THINKING", "false")
     agent = build_agent(monkeypatch)
 
     payload = agent._build_planner_payload(
@@ -96,7 +96,7 @@ def test_agent_planner_payload_uses_the_single_qwen_thinking_policy(monkeypatch)
     )
 
     assert payload["model"] == "qwen3.8-max"
-    assert payload["enable_thinking"] is True
+    assert payload["enable_thinking"] is False
     assert payload["tool_choice"] == "auto"
 
 

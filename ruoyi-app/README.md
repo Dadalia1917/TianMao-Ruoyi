@@ -2,7 +2,7 @@
 
 **产品版本：v1.2.1 · 文档更新时间：2026.08.21（UTC+8）**
 
-> 源码/文档状态：v1.2.1 已同步服务端 Agent 显式分派、单一意图入口、冲突消解与固定模型策略；客户端事件协议和 T10S `GenieApi` 执行通道保持兼容。普通实时语音仍使用 Qwen3.5 Omni，家居 Agent 只使用开启 thinking 的 `qwen3.8-max`。
+> 源码/文档状态：v1.2.1 已同步服务端 Agent 显式分派、单一意图入口、冲突消解与固定模型策略；客户端事件协议和 T10S `GenieApi` 执行通道保持兼容。普通实时语音仍使用 Qwen3.5 Omni，家居 Agent 使用关闭 thinking 的 `qwen3.8-max` 以缩短规划等待时间。
 
 > 交付状态：当前已签名并安装验证的 APK 仍是 v1.1.2。`config.js`、`manifest.json` 和 Android versionCode 尚未同步为 v1.2.1，本 README 更新不代表新 APK 已生成。
 

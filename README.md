@@ -88,7 +88,7 @@ uni-app 3 消费者端 ───┘               │
 - 保留 v1.2.0 的 FastAPI 应用工厂、薄入口、controller/service/realtime 分层、结构化并发和 Protocol 依赖边界。
 - 删除当前主链路对 LangGraph/完整 LangChain 工作流的依赖，改用显式分派器；单一意图入口统一判断普通对话、设备控制、情境建议、确认/取消、追加/替换与安全阻断。
 - 命令归一化、计划构建、冲突消解、参数校验和 Provider 回执均集中到权威实现，避免多个 Handler 重复分析同一轮以及“最高档+最低档”之类自相矛盾方案。
-- 家居建议和 Agent 规划只允许开启 thinking 的 `qwen3.8-max`，默认 30 秒规划超时；普通实时语音固定使用 `qwen3.5-omni-plus-realtime`。当前不为 Agent 启用 Plus、Flash、DeepSeek 或其他回退模型。
+- 家居建议和 Agent 规划固定使用关闭 thinking 的 `qwen3.8-max`，减少家居指令的规划等待时间，默认 30 秒规划超时；普通实时语音固定使用 `qwen3.5-omni-plus-realtime`。当前不为 Agent 启用 Plus、Flash、DeepSeek 或其他回退模型。
 
 #### 功能与行为更新
 

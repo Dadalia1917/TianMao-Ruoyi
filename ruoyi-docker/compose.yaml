@@ -113,6 +113,7 @@ services:
       AGENT_ENABLED: ${AGENT_ENABLED:-true}
       AGENT_API_URL: ${AGENT_API_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions}
       AGENT_MODEL: ${AGENT_MODEL:-qwen3.8-max}
+      AGENT_ENABLE_THINKING: ${AGENT_ENABLE_THINKING:-false}
       AGENT_TIMEOUT_SECONDS: ${AGENT_TIMEOUT_SECONDS:-15}
       AGENT_MAX_TOOL_ROUNDS: ${AGENT_MAX_TOOL_ROUNDS:-3}
       AGENT_LOCATION_NAME: ${AGENT_LOCATION_NAME:-无锡}

@@ -207,7 +207,7 @@ class Settings:
                 "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
             ).strip(),
             agent_model=os.getenv("AGENT_MODEL", RECOMMENDED_AGENT_MODEL).strip(),
-            agent_enable_thinking=_as_bool("AGENT_ENABLE_THINKING", True),
+            agent_enable_thinking=_as_bool("AGENT_ENABLE_THINKING", False),
             agent_timeout_seconds=_as_int("AGENT_TIMEOUT_SECONDS", 30, 3),
             agent_max_tool_rounds=_as_int("AGENT_MAX_TOOL_ROUNDS", 3, 1),
             agent_location_name=os.getenv("AGENT_LOCATION_NAME", "无锡").strip() or "无锡",
